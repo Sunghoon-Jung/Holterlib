@@ -57,54 +57,13 @@ def get_datetime(filename, offset, time=False):
 class Holter:
     def __init__(self, filename):
         self.filename = filename
-        self.header = Header(filename)
         self.data = None
+        self.load_header()
         if not self.is_valid():
             print( "Warning: file appears to be invalid or corrupt." )
 
-    def load_data(self):
-        """This may take some time and memory, so we don't do it until we're asked.  The
-        'data' variable is a numpy array indexed as data[lead][sample_number],
-        with values stored in mV.
-        """
-        # Get the data:
-        with open(self.filename, 'rb') as f:
-            f.seek(self.header.var_block_offset, os.SEEK_SET)
-            self.data = np.fromfile(f, dtype=np.int16)
-        # Convert it to a 2D array of floats, cropping the end if necessary:
-        nleads = self.header.nleads
-        self.data = np.reshape(self.data[:len(self.data)/nleads*nleads],
-                               (nleads, len(self.data)/nleads), order='F')
-        self.data = self.data.astype(float)
-        # Convert measurements to mV:
-        for i in range(len(self.data)):  # i = lead
-            self.data[i] /= 1e6/self.ampl_res[i]
-
-    def is_valid(self):
-        """Check for obvious problems with the file: wrong file signature, or
-        invalid values for file or header size.  CRC is not yet being checked.
-        """
-        if self.header.magic_number != 'ISHNE1.0':
-            return False
-        if self.header.var_block_offset != 522:
-            return False
-        filesize = os.path.getsize(self.filename)
-        expected = 522 + self.header.var_block_size + 2*self.header.ecg_size
-        if filesize!=expected:
-            # ecg_size may have been reported as samples per lead instead of
-            # total number of samples
-            expected += 2*self.header.ecg_size*(self.header.nleads-1)
-            if filesize!=expected:
-                return False
-        # TODO: validate checksum here and return False if it fails.  some libs
-        # that should be able to do it:
-        #   from PyCRC.CRCCCITT import CRCCCITT
-        #   from crccheck.crc import Crc16Ccitt
-        return True  # didn't find any problems above
-
-class Header:
-
-    def __init__(self, filename):
+    def load_header(self):
+        filename = self.filename
         assert os.path.getsize(filename) >= 522, "File is too small to be an ISHNE Holter."
 
         self.magic_number = get_val(filename, 0, 'a8')
@@ -143,7 +102,47 @@ class Header:
         else:
             self.var_block = None
 
-    def leadspec(self, lead):
+    def load_data(self):
+        """This may take some time and memory, so we don't do it until we're asked.  The
+        'data' variable is a numpy array indexed as data[lead][sample_number],
+        with values stored in mV.
+        """
+        # Get the data:
+        with open(self.filename, 'rb') as f:
+            f.seek(self.var_block_offset, os.SEEK_SET)
+            self.data = np.fromfile(f, dtype=np.int16)
+        # Convert it to a 2D array of floats, cropping the end if necessary:
+        nleads = self.nleads
+        self.data = np.reshape(self.data[:len(self.data)/nleads*nleads],
+                               (nleads, len(self.data)/nleads), order='F')
+        self.data = self.data.astype(float)
+        # Convert measurements to mV:
+        for i in range(len(self.data)):  # i = lead
+            self.data[i] /= 1e6/self.ampl_res[i]
+
+    def is_valid(self):
+        """Check for obvious problems with the file: wrong file signature, or
+        invalid values for file or header size.  CRC is not yet being checked.
+        """
+        if self.magic_number != 'ISHNE1.0':
+            return False
+        if self.var_block_offset != 522:
+            return False
+        filesize = os.path.getsize(self.filename)
+        expected = 522 + self.var_block_size + 2*self.ecg_size
+        if filesize!=expected:
+            # ecg_size may have been reported as samples per lead instead of
+            # total number of samples
+            expected += 2*self.ecg_size*(self.nleads-1)
+            if filesize!=expected:
+                return False
+        # TODO: validate checksum here and return False if it fails.  some libs
+        # that should be able to do it:
+        #   from PyCRC.CRCCCITT import CRCCCITT
+        #   from crccheck.crc import Crc16Ccitt
+        return True  # didn't find any problems above
+
+    def get_leadspec(self, lead):
         """Convert lead number (0-indexed) into name (such as 'V1')."""
         lead_specs = {
             -9: 'absent', 0: 'unknown', 1: 'generic',
@@ -175,10 +174,6 @@ class Header:
     #     5: 'dual chamber bipolar',
     # }
 
-    # TODO?: merge Header back into Holter class
-
-class Subject:
-    pass  # TODO?  this would hold static subject info from header.  so we can
-          # do stuff like holter.subject.is_male, holter.subject.name, etc.
+    # TODO: dictionaries for gender and race?
 
 ################################################################################
