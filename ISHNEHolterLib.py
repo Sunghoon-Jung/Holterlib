@@ -1,8 +1,12 @@
 #!/usr/bin/env python
 
+"""Reference: http://thew-project.org/papers/Badilini.ISHNE.Holter.Standard.pdf"""
+
 import os
 import numpy as np
 import datetime
+
+################################## Functions: ##################################
 
 def get_val(filename, ptr, datatype):
     """Jump to position 'ptr' in file and read a value of a given type (e.g. int16)."""
@@ -23,6 +27,12 @@ def get_long_int(filename, ptr):
     val = get_val(filename, ptr, np.int32)
     return int( val )
 
+def ckstr(checksum):
+    """Return a value as e.g. 'FC8E', i.e. an uppercase hex string with no leading
+    '0x' or trailing 'L'.
+    """
+    return hex(checksum)[2:].rstrip('L').upper()
+
 def get_datetime(filename, offset, time=False):
     """Read three consecutive 16-bit values from file and interpret them as (day,
     month, year) or (hour, minute, second).  Return a date or time object.
@@ -42,6 +52,14 @@ def get_datetime(filename, offset, time=False):
         output = None
     return output
 
+def get_umv(filename, lead):
+    """Get units/mV for a recording.  lead is 0-indexed."""
+    nv_res = get_short_int(filename, 206+lead*2)
+    umV = 1e6 / nv_res
+    return umV
+
+################################### Classes: ###################################
+
 class Holter:
     def __init__(self, filename):
         self.filename = filename
@@ -51,37 +69,44 @@ class Holter:
             print( "Warning: file appears to be invalid or corrupt." )
 
     def load_data(self):
-        """This may take some time and memory, so we don't do it until we're asked."""
-        self.data = Data()
+        """This may take some time and memory, so we don't do it until we're asked.  The
+        'data' variable is a numpy array indexed as data[lead][sample_number],
+        with values stored in mV.
+        """
+        # Get the data:
+        with open(self.filename, 'rb') as f:
+            f.seek(self.header.var_block_offset, os.SEEK_SET)
+            self.data = np.fromfile(f, dtype=np.int16)
+        # Convert it to a 2D array of floats, cropping the end if necessary:
+        nleads = self.header.nleads
+        self.data = np.reshape(self.data[:len(self.data)/nleads*nleads],
+                               (nleads, len(self.data)/nleads), order='F')
+        self.data = self.data.astype(float)
+        # Convert measurements to mV:
+        for i in range(len(self.data)):
+            self.data[i] /= get_umv(self.filename, i)  # TODO: see if this is optimized
 
     def is_valid(self):
-        """Check for obvious problems with the file, namely failing header checksum,
-        wrong file signature, or invalid values for file or header size.
+        """Check for obvious problems with the file: wrong file signature, or
+        invalid values for file or header size.  CRC is not yet being checked.
         """
         if self.header.magic_number != 'ISHNE1.0':
             return False
         if self.header.var_block_offset != 522:
             return False
-        if False:  # TODO: validate checksum
-            return False
-        if False:         # TODO: check size of file compared to expected size.  note
-            return False  # that ecg_size may be reported as size per lead OR total size.
+        filesize = os.path.getsize(self.filename)
+        expected = 522 + self.header.var_block_size + 2*self.header.ecg_size
+        if filesize!=expected:
+            # ecg_size may have been reported as samples per lead instead of
+            # total number of samples
+            expected += 2*self.header.ecg_size*(self.header.nleads-1)
+            if filesize!=expected:
+                return False
+        # TODO: validate checksum here and return False if it fails.  some libs
+        # that should be able to do it:
+        #   from PyCRC.CRCCCITT import CRCCCITT
+        #   from crccheck.crc import Crc16Ccitt
         return True  # didn't find any problems above
-
-
-# // If Sample_Size_ECG is total number of samples:
-# //     int samples_per_lead = m_ISHNEHeader.Sample_Size_ECG / m_ISHNEHeader.nLeads;
-# // If Sample_Size_ECG is number of samples for a single lead:
-# //     int samples_per_lead = m_ISHNEHeader.Sample_Size_ECG;
-# // If Sample_Size_ECG is unreliable/nonsense:
-# int samples_per_lead = (file_size - m_ISHNEHeader.Offset_ECG_block) / m_ISHNEHeader.nLeads / 2;
-# m_ISHNEData.data = new short*[m_ISHNEHeader.nLeads];  // 1st dimension
-# for(i = 0; i < m_ISHNEHeader.nLeads; i++) {
-#   m_ISHNEData.data[i] = new short[samples_per_lead];  // 2nd dimension
-# }
-# m_ISHNEData.nLeads = m_ISHNEHeader.nLeads;
-# m_ISHNEData.samples_per_lead = samples_per_lead;
-
 
 class Header:
 
@@ -118,7 +143,8 @@ class Header:
         assert os.path.getsize(filename) >= 522, "File is too small to be an ISHNE Holter."
 
         self.magic_number = get_val(filename, 0, 'a8')
-        self.checksum = get_short_int(filename, 8)
+        self.checksum = get_val(filename, 8, np.uint16)
+        #print( "Checksum in file: %s" % ckstr(self.checksum) )
 
         # Fixed-size part of header:
         self.var_block_size   = get_long_int(filename, 10)
@@ -149,13 +175,11 @@ class Header:
         # Variable-length part of header:
         if self.var_block_size > 0:
             self.var_block = get_val(filename, 522, 'a'+str(self.var_block_size))
-            # TODO?: keep as binary, not string
         else:
             self.var_block = None
 
 class Subject:
     pass  # TODO?  this would hold static subject info from header.  so we can
           # do stuff like holter.subject.is_male, holter.subject.name, etc.
-
-class Data:  # TODO: this holds the actual samples
-    pass
+            
+################################################################################
