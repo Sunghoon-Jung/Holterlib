@@ -104,35 +104,6 @@ class Holter:
 
 class Header:
 
-    # lead_specs = {
-    #     -9: 'absent', 0: 'unknown', 1: 'generic',
-    #     2: 'X',    3: 'Y',    4: 'Z',
-    #     5: 'I',    6: 'II',   7: 'III',
-    #     8: 'aVR',  9: 'aVL', 10: 'aVF',
-    #     11: 'V1', 12: 'V2',  13: 'V3',
-    #     14: 'V4', 15: 'V5',  16: 'V6',
-    #     17: 'ES', 18: 'AS',  19: 'AI'
-    # }
-
-    # lead_quals = {
-    #     -9: 'absent',
-    #     0: 'unknown',
-    #     1: 'good',
-    #     2: 'intermittent noise',
-    #     3: 'frequent noise',
-    #     4: 'intermittent disconnect',
-    #     5: 'frequent disconnect'
-    # }
-
-    # pm_codes = {
-    #     0: 'none',
-    #     1: 'unknown type',
-    #     2: 'single chamber unipolar',
-    #     3: 'dual chamber unipolar',
-    #     4: 'single chamber bipolar',
-    #     5: 'dual chamber bipolar',
-    # }
-
     def __init__(self, filename):
         assert os.path.getsize(filename) >= 522, "File is too small to be an ISHNE Holter."
 
@@ -171,6 +142,38 @@ class Header:
             self.var_block = get_val(filename, 522, 'a'+str(self.var_block_size))
         else:
             self.var_block = None
+
+    def leadspec(self, lead):
+        """Convert lead number (0-indexed) into name (such as 'V1')."""
+        lead_specs = {
+            -9: 'absent', 0: 'unknown', 1: 'generic',
+            2: 'X',    3: 'Y',    4: 'Z',
+            5: 'I',    6: 'II',   7: 'III',
+            8: 'aVR',  9: 'aVL', 10: 'aVF',
+            11: 'V1', 12: 'V2',  13: 'V3',
+            14: 'V4', 15: 'V5',  16: 'V6',
+            17: 'ES', 18: 'AS',  19: 'AI'
+        }
+        return lead_specs[self.lead_spec[lead]]
+
+    # lead_quals = {
+    #     -9: 'absent',
+    #     0: 'unknown',
+    #     1: 'good',
+    #     2: 'intermittent noise',
+    #     3: 'frequent noise',
+    #     4: 'intermittent disconnect',
+    #     5: 'frequent disconnect'
+    # }
+
+    # pm_codes = {
+    #     0: 'none',
+    #     1: 'unknown type',
+    #     2: 'single chamber unipolar',
+    #     3: 'dual chamber unipolar',
+    #     4: 'single chamber bipolar',
+    #     5: 'dual chamber bipolar',
+    # }
 
     # TODO?: merge Header back into Holter class
 
