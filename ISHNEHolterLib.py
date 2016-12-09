@@ -52,12 +52,6 @@ def get_datetime(filename, offset, time=False):
         output = None
     return output
 
-def get_umv(filename, lead):
-    """Get units/mV for a recording.  lead is 0-indexed."""
-    nv_res = get_short_int(filename, 206+lead*2)
-    umV = 1e6 / nv_res
-    return umV
-
 ################################### Classes: ###################################
 
 class Holter:
@@ -83,8 +77,8 @@ class Holter:
                                (nleads, len(self.data)/nleads), order='F')
         self.data = self.data.astype(float)
         # Convert measurements to mV:
-        for i in range(len(self.data)):
-            self.data[i] /= get_umv(self.filename, i)  # TODO: see if this is optimized
+        for i in range(len(self.data)):  # i = lead
+            self.data[i] /= 1e6/self.ampl_res[i]
 
     def is_valid(self):
         """Check for obvious problems with the file: wrong file signature, or
@@ -178,8 +172,10 @@ class Header:
         else:
             self.var_block = None
 
+    # TODO?: merge Header back into Holter class
+
 class Subject:
     pass  # TODO?  this would hold static subject info from header.  so we can
           # do stuff like holter.subject.is_male, holter.subject.name, etc.
-            
+
 ################################################################################
