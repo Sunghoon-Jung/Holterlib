@@ -6,6 +6,7 @@ import os
 import numpy as np
 import datetime
 import sys
+from PyCRC.CRCCCITT import CRCCCITT
 
 ################################## Functions: ##################################
 
@@ -121,15 +122,28 @@ class Holter:
         for i in range(len(self.data)):  # i = lead
             self.data[i] /= 1e6/self.ampl_res[i]
 
-    def is_valid(self):
-        """Check for obvious problems with the file: wrong file signature, or
-        invalid values for file or header size.  CRC is not yet being checked.
+    def compute_checksum(self):
+        """Note: this operates on the file on disk (pointed to by self.filename), *not*
+        the current data structure in memory.
+        """
+        with open(self.filename, 'rb') as f:
+            f.seek(10, os.SEEK_SET)
+            header_block = np.fromfile(f, dtype=np.uint8, count=self.ecg_block_offset-10)
+        return np.uint16( CRCCCITT(version='FFFF').calculate(header_block.tostring()) )
+        # tostring() is just to turn it into a bytearray
+        # Another method to do the calculation:
+        #   from crccheck.crc import Crc16CcittFalse
+        #   Crc16CcittFalse.calc( header )
+
+    def is_valid(self, verify_checksum=True):
+        """Check for obvious problems with the file: wrong file signature, bad checksum,
+        or invalid values for file or header size.
         """
         if self.magic_number != b'ISHNE1.0':
-            print ("magic fail")  # debugging
+            #print ("magic fail")  # debugging
             return False
         if self.var_block_offset != 522:
-            print ("offset fail")  # debugging
+            #print ("offset fail")  # debugging
             return False
         filesize = os.path.getsize(self.filename)
         expected = 522 + self.var_block_size + 2*self.ecg_size
@@ -138,12 +152,11 @@ class Holter:
             # total number of samples
             expected += 2*self.ecg_size*(self.nleads-1)
             if filesize!=expected:
-                print ("size fail")  # debugging
+                #print ("size fail")  # debugging
                 return False
-        # TODO: validate checksum here and return False if it fails.  some libs
-        # that should be able to do it:
-        #   from PyCRC.CRCCCITT import CRCCCITT
-        #   from crccheck.crc import Crc16Ccitt
+        if verify_checksum and (self.checksum != self.compute_checksum()):
+                #print ("checksum fail")  # debugging
+                return False
         return True  # didn't find any problems above
 
     def get_leadspec(self, lead):
