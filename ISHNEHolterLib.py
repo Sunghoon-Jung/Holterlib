@@ -63,6 +63,8 @@ class Holter:
         self.load_header()
         if not self.is_valid():
             print( "Warning: file appears to be invalid or corrupt." )
+        # else:
+        #     print( "Loaded header successfully.  Remember to run load_data() if you need it." )
 
     def load_header(self):
         filename = self.filename
@@ -97,6 +99,7 @@ class Holter:
         self.proprietary      =        get_val(filename, 274, 'a80')
         self.copyright        =        get_val(filename, 354, 'a80')
         self.reserved         =        get_val(filename, 434, 'a88')
+        # TODO?: read all the above with one open()
 
         # Variable-length part of header:
         if self.var_block_size > 0:
@@ -115,22 +118,29 @@ class Holter:
             self.data = np.fromfile(f, dtype=np.int16)
         # Convert it to a 2D array of floats, cropping the end if necessary:
         nleads = self.nleads
-        self.data = np.reshape(self.data[:len(self.data)/nleads*nleads],
-                               (nleads, len(self.data)/nleads), order='F')
+        self.data = np.reshape( self.data[:int(len(self.data)/nleads*nleads)],
+                                (nleads, int(len(self.data)/nleads)),
+                                order='F' )
         self.data = self.data.astype(float)
         # Convert measurements to mV:
         for i in range(len(self.data)):  # i = lead
             self.data[i] /= 1e6/self.ampl_res[i]
+        # TODO?: store both copies (original int16 and mV float) to prevent
+        # possible rounding errors when converting back
 
-    def compute_checksum(self):
-        """Note: this operates on the file on disk (pointed to by self.filename), *not*
-        the current data structure in memory.
+    def compute_checksum(self, header_block=None):
+        """Compute checksum of header block.  If header_block is None, it operates on
+        the file on disk (pointed to by self.filename).
+
+        Keyword arguments:
+        header_block -- a bytes object containing the ISHNE header (typically bytes 10-522 of the file)
         """
-        with open(self.filename, 'rb') as f:
-            f.seek(10, os.SEEK_SET)
-            header_block = np.fromfile(f, dtype=np.uint8, count=self.ecg_block_offset-10)
-        return np.uint16( CRCCCITT(version='FFFF').calculate(header_block.tostring()) )
-        # tostring() is just to turn it into a bytearray
+        if header_block == None:
+            with open(self.filename, 'rb') as f:
+                f.seek(10, os.SEEK_SET)
+                header_block = np.fromfile(f, dtype=np.uint8, count=self.ecg_block_offset-10)
+                header_block = header_block.tostring()  # to make it a bytes object
+        return np.uint16( CRCCCITT(version='FFFF').calculate(header_block) )
         # Another method to do the calculation:
         #   from crccheck.crc import Crc16CcittFalse
         #   Crc16CcittFalse.calc( header )
@@ -193,83 +203,128 @@ class Holter:
 
     # TODO: dictionaries for gender and race?
 
+    def get_header_bytes(self):
+        """Create the ISHNE header from the various instance variables.  The
+        variable-length block is included, but the 10 'pre-header' bytes are
+        not.
+
+        This is the only function in the class that requires python3, for
+        to_bytes().
+        """
+        header = bytearray()
+
+        header += (self.var_block_size       ).to_bytes(4, sys.byteorder)
+        header += (self.ecg_size             ).to_bytes(4, sys.byteorder)
+        header += (self.var_block_offset     ).to_bytes(4, sys.byteorder)
+        header += (self.ecg_block_offset     ).to_bytes(4, sys.byteorder)
+        header += (self.file_version         ).to_bytes(2, sys.byteorder, signed=True)
+        header += self.first_name          [:40].ljust(40, b'\x00')
+        header += self.last_name           [:40].ljust(40, b'\x00')
+        header += self.id                  [:20].ljust(20, b'\x00')
+        header += (self.sex                  ).to_bytes(2, sys.byteorder)
+        header += (self.race                 ).to_bytes(2, sys.byteorder)
+        if self.birth_date:
+            header += (self.birth_date.day   ).to_bytes(2, sys.byteorder)
+            header += (self.birth_date.month ).to_bytes(2, sys.byteorder)
+            header += (self.birth_date.year  ).to_bytes(2, sys.byteorder)
+        else:
+            header += (0                     ).to_bytes(6, sys.byteorder)  # TODO?: -9s
+        if self.record_date:
+            header += (self.record_date.day  ).to_bytes(2, sys.byteorder)
+            header += (self.record_date.month).to_bytes(2, sys.byteorder)
+            header += (self.record_date.year ).to_bytes(2, sys.byteorder)
+        else:
+            header += (0                     ).to_bytes(6, sys.byteorder)  # TODO?: -9s
+        if self.file_date:
+            header += (self.file_date.day    ).to_bytes(2, sys.byteorder)
+            header += (self.file_date.month  ).to_bytes(2, sys.byteorder)
+            header += (self.file_date.year   ).to_bytes(2, sys.byteorder)
+        else:
+            header += (0                     ).to_bytes(6, sys.byteorder)  # TODO?: -9s
+        if self.start_time:
+            header += (self.start_time.hour  ).to_bytes(2, sys.byteorder)
+            header += (self.start_time.minute).to_bytes(2, sys.byteorder)
+            header += (self.start_time.second).to_bytes(2, sys.byteorder)
+        else:
+            header += (0                     ).to_bytes(6, sys.byteorder)  # TODO?: -9s
+        header += (self.nleads               ).to_bytes(2, sys.byteorder)
+        for i in range(12):
+            header += (self.lead_spec[i]     ).to_bytes(2, sys.byteorder, signed=True)
+        for i in range(12):
+            header += (self.lead_quality[i]  ).to_bytes(2, sys.byteorder, signed=True)
+        for i in range(12):
+            header += (self.ampl_res[i]      ).to_bytes(2, sys.byteorder, signed=True)
+        header += (self.pm                   ).to_bytes(2, sys.byteorder, signed=True)
+        header += self.recorder_type       [:40].ljust(40, b'\x00')
+        header += (self.sr                   ).to_bytes(2, sys.byteorder)
+        header += self.proprietary         [:80].ljust(80, b'\x00')
+        header += self.copyright           [:80].ljust(80, b'\x00')
+        header += self.reserved            [:88].ljust(88, b'\x00')
+        if self.var_block_size > 0:
+            header += self.var_block
+
+        return bytes( header )
+
+    def autofill_header(self):
+        """Automatically update several header variables for consistency.  For example,
+        ecg_size will be set to the current length of the data array, and
+        var_block_size will be set to the current length of the variable block
+        string.
+        """
+        try:
+            self.var_block_size = len( self.var_block )
+        except TypeError:
+            self.var_block_size = 0
+        try:
+            self.ecg_size = len( self.data[0] )
+            # it's not clear if we should report the total number of samples
+            # for *one* lead, or for *all* leads.  we do the former.
+        except TypeError:
+            self.ecg_size = 0
+        self.var_block_offset = 522
+        self.ecg_block_offset = 522+self.var_block_size
+        self.file_date = datetime.datetime.now().date()
+        try:
+            self.nleads = len( self.data )
+            # TODO: if there's only 1 lead, make sure it's still stored as a 2D array
+        except TypeError:
+            self.nleads = 0
+        # TODO?: checksum.  may break is_valid().
+        # TODO?: enforce proper values (or -9 or whatever) for all fields
+
     def write_file(self, overwrite=False):
         """This function will write the object to disk as an ISHNE Holter file.  You do
-        *not* need to set the following variables: magic_number, checksum,
-        var_block_size, ecg_size, var_block_offset, ecg_block_offset, and file_date.
+        *not* need to pre-set the following variables: magic_number, checksum,
+        var_block_size, ecg_size, var_block_offset, ecg_block_offset, file_date, and
+        nleads.  They will be updated automatically when this function is called.
 
         By default, it will not overwrite an existing file.
-
-        This is the only function in the class that requires python3, for to_bytes().
         """
         if os.path.exists(self.filename):
             assert overwrite, "File with that name already exists."
             os.remove(self.filename)  # overwrite is enabled; rm the existing
                                       # file before we start (note: may fail if
                                       # it's a directory not a file)
-        try:
-            var_block_size = len( self.var_block )
-        except TypeError:
-            var_block_size = 0
-        try:
-            ecg_size = len( self.data[0] )
-            # it's not clear if we should report the total number of samples
-            # for *one* lead, or for *all* leads.  we do the former.
-        except TypeError:
-            ecg_size = 0
 
+        # Prepare known/computable values such as variable block offset:
+        self.autofill_header()
+
+        # Write file:
         with open(self.filename, 'ab') as f:
+            header = self.get_header_bytes()
+            # Preheader:
             f.write( b'ISHNE1.0' )
-            f.write( b'\x00\x00' )  # TODO: checksum
-            f.write( (var_block_size            ).to_bytes(4, sys.byteorder) )
-            f.write( (ecg_size                  ).to_bytes(4, sys.byteorder) )
-            f.write( (522                       ).to_bytes(4, sys.byteorder) )
-            f.write( (522+var_block_size        ).to_bytes(4, sys.byteorder) )
-            f.write( (self.file_version         ).to_bytes(2, sys.byteorder) )
-            f.write( self.first_name          [:40].ljust(40, b'\x00') )
-            f.write( self.last_name           [:40].ljust(40, b'\x00') )
-            f.write( self.id                  [:20].ljust(20, b'\x00') )
-            f.write( (self.sex                  ).to_bytes(2, sys.byteorder) )
-            f.write( (self.race                 ).to_bytes(2, sys.byteorder) )
-            if self.birth_date:
-                f.write( (self.birth_date.day   ).to_bytes(2, sys.byteorder) )
-                f.write( (self.birth_date.month ).to_bytes(2, sys.byteorder) )
-                f.write( (self.birth_date.year  ).to_bytes(2, sys.byteorder) )
-            else:
-                f.write( (0                     ).to_bytes(6, sys.byteorder) )
-            if self.record_date:
-                f.write( (self.record_date.day  ).to_bytes(2, sys.byteorder) )
-                f.write( (self.record_date.month).to_bytes(2, sys.byteorder) )
-                f.write( (self.record_date.year ).to_bytes(2, sys.byteorder) )
-            else:
-                f.write( (0                     ).to_bytes(6, sys.byteorder) )
-            today = datetime.datetime.now().date()
-            f.write( (today.day                 ).to_bytes(2, sys.byteorder) )
-            f.write( (today.month               ).to_bytes(2, sys.byteorder) )
-            f.write( (today.year                ).to_bytes(2, sys.byteorder) )
-            if self.start_time:
-                f.write( (self.start_time.hour  ).to_bytes(2, sys.byteorder) )
-                f.write( (self.start_time.minute).to_bytes(2, sys.byteorder) )
-                f.write( (self.start_time.second).to_bytes(2, sys.byteorder) )
-            else:
-                f.write( (0                     ).to_bytes(6, sys.byteorder) )
-            f.write( (self.nleads               ).to_bytes(2, sys.byteorder) )
-            for i in range(12):
-                f.write( (self.lead_spec[i]     ).to_bytes(2, sys.byteorder) )
-            for i in range(12):
-                f.write( (self.lead_quality[i]  ).to_bytes(2, sys.byteorder) )
-            for i in range(12):
-                f.write( (self.ampl_res[i]      ).to_bytes(2, sys.byteorder) )
-            f.write( (self.pm                   ).to_bytes(2, sys.byteorder) )
-            f.write( self.recorder_type       [:40].ljust(40, b'\x00') )
-            f.write( (self.sr                   ).to_bytes(2, sys.byteorder) )
-            f.write( self.proprietary         [:80].ljust(80, b'\x00') )
-            f.write( self.copyright           [:80].ljust(80, b'\x00') )
-            f.write( self.reserved            [:88].ljust(88, b'\x00') )
-            if var_block_size > 0:
-                f.write(self.var_block)
-
-            # TODO: save data block here
-            # TODO: handle negative values (to_bytes tries to make unsigned by default)
+            f.write( self.compute_checksum(header_block=header) )
+            # Header:
+            f.write( header )
+            # Data block:
+            data = self.data
+            for i in range(len(data)):  # i = lead
+                data[i] *= 1e6/self.ampl_res[i]  # convert measurements back from mV
+            data = np.reshape( data,
+                               self.nleads*len(data[0]),
+                               'F' )
+            data = data.astype(np.int16)
+            f.write( data )
 
 ################################################################################
