@@ -65,6 +65,7 @@ class Holter:
             print( "Warning: file appears to be invalid or corrupt." )
         # else:
         #     print( "Loaded header successfully.  Remember to run load_data() if you need it." )
+        # TODO: set up for creating a *new* Holter, not just loading an existing one from a file
 
     def load_header(self):
         filename = self.filename
