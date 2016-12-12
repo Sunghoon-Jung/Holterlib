@@ -332,4 +332,8 @@ class Holter:
             data = data.astype(np.int16)
             f.write( data )
 
+    # TODO?: Lead object that keeps lead_spec, lead_quality, ampl_res, and
+    # possibly data for a single lead.  Then keep a single array of Lead objects
+    # in each Holter.
+
 ################################################################################
