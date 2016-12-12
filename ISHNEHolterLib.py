@@ -167,6 +167,7 @@ class Holter:
         if verify_checksum and (self.checksum != self.compute_checksum()):
                 #print ("checksum fail")  # debugging
                 return False
+        # TODO?: check SR > 0
         return True  # didn't find any problems above
 
     def get_leadspec(self, lead):
@@ -290,7 +291,10 @@ class Holter:
         except TypeError:
             self.nleads = 0
         # TODO?: checksum.  may break is_valid().
-        # TODO?: enforce proper values (or -9 or whatever) for all fields
+
+        # TODO: enforce proper values (or -9 or whatever) for all fields.  in
+        # particular, lead_spec, lead_quality, and ampl_res need to be -9 for
+        # non-present leads.  sex and race should be zeroed if they're invalid.
 
     def write_file(self, overwrite=False):
         """This function will write the object to disk as an ISHNE Holter file.  You do
