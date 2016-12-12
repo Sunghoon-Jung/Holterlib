@@ -24,10 +24,15 @@ In Windows: append the library location to the PYTHONPATH variable in System Pro
     x = Holter('some_holter.ecg')
     x.load_data()
 
-    # Delete leads other than V2:
+    # Delete data from leads other than V2:
     leadspecs = [ x.get_leadspec(i) for i in range(x.nleads) ]
     keep = leadspecs.index('V2')
     x.data = [ x.data[keep] ]
+
+    # Since V2 is now the first lead, copy its specs to that lead:
+    x.lead_spec[0] = x.lead_spec[keep]
+    x.lead_quality[0] = x.lead_quality[keep]
+    x.ampl_res[0] = x.ampl_res[keep]
 
     # Write back to disk:
     x.write_file(overwrite=True)
