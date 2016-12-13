@@ -174,6 +174,10 @@ class Holter:
         # TODO?: check SR > 0
         return True  # didn't find any problems above
 
+    def get_length(self):
+        """Return the length of the (first lead of the) Holter as a timedelta object."""
+        return datetime.timedelta(seconds = 1.0 * len(self.lead[0].data) / self.sr)
+
     # TODO?:
     # pm_codes = {
     #     0: 'none',
