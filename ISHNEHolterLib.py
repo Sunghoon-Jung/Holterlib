@@ -107,6 +107,8 @@ class Holter:
         else:
             self.var_block = None
 
+        # TODO?: terminate strings read above at first \x00
+
         # Create array of Leads (where lead specs and data will be stored):
         self.lead = [None for _ in range(self.nleads)]
         for i in range(self.nleads):
