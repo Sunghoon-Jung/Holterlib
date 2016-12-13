@@ -19,21 +19,16 @@ In Windows: append the library location to the PYTHONPATH variable in System Pro
 ### Example ###
 
     from ISHNEHolterLib import Holter
-
+    
     # Load a file from disk:
     x = Holter('some_holter.ecg')
     x.load_data()
-
+    
     # Delete data from leads other than V2:
-    leadspecs = [ x.get_leadspec(i) for i in range(x.nleads) ]
+    leadspecs = [ lead.spec_str() for lead in x.lead ]
     keep = leadspecs.index('V2')
-    x.data = [ x.data[keep] ]
-
-    # Since V2 is now the first lead, copy its specs to that lead:
-    x.lead_spec[0] = x.lead_spec[keep]
-    x.lead_quality[0] = x.lead_quality[keep]
-    x.ampl_res[0] = x.ampl_res[keep]
-
+    x.lead = [ x.lead[keep] ]
+    
     # Write back to disk:
     x.write_file(overwrite=True)
 
@@ -42,7 +37,11 @@ In Windows: append the library location to the PYTHONPATH variable in System Pro
 In the example above, `x` contains the following variables:
 
 * `filename`: filename specified when `x` was instantiated
-* `data`: m by n array of ECG samples.  m=lead, n=sample number.  units are mV.
+* `lead`: list of Lead objects, each containing the following:
+    * `spec`: lead type, e.g. 11='V1'
+    * `quality`: lead quality, e.g. 3='frequent noise'
+    * `res`: lead resolution in nV
+    * `data`: 1d array of samples for this lead, in mV
 * `file_version`
 * `first_name` and `last_name`
 * `id`
@@ -53,16 +52,13 @@ In the example above, `x` contains the following variables:
 * `file_date` as a datetime.date object
 * `start_time` as a datetime.time object
 * `nleads`: number of leads
-* `lead_spec`: array of lead types, e.g. 11='V1'
-* `lead_quality`: array of lead qualities, e.g. 3='frequent noise'
-* `ampl_res`: array of lead resolutions in nV
 * `pm`: pacemaker code, e.g. 2='single chamber unipolar'
 * `recorder_type`: analog or digital
 * `sr`: sample rate in Hz
 * Miscellaneous text blocks: `proprietary`, `copyright`, and `reserved`
 * `var_block`: variable-length text block, not always present
 
-Everything except `data` is loaded when `x` is instantiated.  `load_data()` is then called to populate `data`.
+Everything except `data` is loaded when `x` is instantiated.  `load_data()` is then called to populate `data` for each lead.
 
 See http://thew-project.org/papers/Badilini.ISHNE.Holter.Standard.pdf to decode the values that use a dictionary.  `get_leadspec()` can decode the ones in `lead_spec`.
 

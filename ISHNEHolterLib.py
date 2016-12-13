@@ -54,17 +54,16 @@ def ckstr(checksum):
     """
     return hex(checksum)[2:].rstrip('L').upper()
 
-#################################### Class: ####################################
+################################### Classes: ###################################
 
 class Holter:
     def __init__(self, filename):
         self.filename = filename
-        self.data = None
         self.load_header()
         if not self.is_valid():
             print( "Warning: file appears to be invalid or corrupt." )
         # else:
-        #     print( "Loaded header successfully.  Remember to run load_data() if you need it." )
+        #     print( "Loaded header successfully.  Remember to run load_data() if you need the data too." )
         # TODO: set up for creating a *new* Holter, not just loading an existing one from a file
 
     def load_header(self):
@@ -91,9 +90,9 @@ class Holter:
         self.file_date        =   get_datetime(filename, 144)  # date of creation of output file
         self.start_time       =   get_datetime(filename, 150, time=True)  # start time of Holter
         self.nleads           =  get_short_int(filename, 156)
-        self.lead_spec        = [get_short_int(filename, 158+i*2) for i in range(12)]
-        self.lead_quality     = [get_short_int(filename, 182+i*2) for i in range(12)]
-        self.ampl_res         = [get_short_int(filename, 206+i*2) for i in range(12)]  # lead resolution in nV
+        lead_spec             = [get_short_int(filename, 158+i*2) for i in range(12)]
+        lead_quality          = [get_short_int(filename, 182+i*2) for i in range(12)]
+        ampl_res              = [get_short_int(filename, 206+i*2) for i in range(12)]  # lead resolution in nV
         self.pm               =  get_short_int(filename, 230)  # pacemaker
         self.recorder_type    =        get_val(filename, 232, 'a40')  # analog or digital
         self.sr               =  get_short_int(filename, 272)  # sample rate in Hz
@@ -108,6 +107,11 @@ class Holter:
         else:
             self.var_block = None
 
+        # Create array of Leads (where lead specs and data will be stored):
+        self.lead = [None for _ in range(self.nleads)]
+        for i in range(self.nleads):
+            self.lead[i] = Lead(lead_spec[i], lead_quality[i], ampl_res[i])
+
     def load_data(self):
         """This may take some time and memory, so we don't do it until we're asked.  The
         'data' variable is a numpy array indexed as data[lead][sample_number],
@@ -116,18 +120,15 @@ class Holter:
         # Get the data:
         with open(self.filename, 'rb') as f:
             f.seek(self.var_block_offset, os.SEEK_SET)
-            self.data = np.fromfile(f, dtype=np.int16)
-        # Convert it to a 2D array of floats, cropping the end if necessary:
+            data = np.fromfile(f, dtype=np.int16)
+        # Convert it to a 2D array, cropping the end if necessary:
         nleads = self.nleads
-        self.data = np.reshape( self.data[:int(len(self.data)/nleads*nleads)],
-                                (nleads, int(len(self.data)/nleads)),
+        data = np.reshape( data[:int(len(data)/nleads)*nleads],
+                                (nleads, int(len(data)/nleads)),
                                 order='F' )
-        self.data = self.data.astype(float)
-        # Convert measurements to mV:
-        for i in range(len(self.data)):  # i = lead
-            self.data[i] /= 1e6/self.ampl_res[i]
-        # TODO?: store both copies (original int16 and mV float) to prevent
-        # possible rounding errors when converting back
+        # Save each row (lead), converting measurements to mV in the process:
+        for i in range(nleads):
+            self.lead[i].save_data( data[i] )
 
     def compute_checksum(self, header_block=None):
         """Compute checksum of header block.  If header_block is None, it operates on
@@ -170,29 +171,6 @@ class Holter:
                 return False
         # TODO?: check SR > 0
         return True  # didn't find any problems above
-
-    def get_leadspec(self, lead):
-        """Convert lead number (0-indexed) into name (such as 'V1')."""
-        lead_specs = {
-            -9: 'absent', 0: 'unknown', 1: 'generic',
-            2: 'X',    3: 'Y',    4: 'Z',
-            5: 'I',    6: 'II',   7: 'III',
-            8: 'aVR',  9: 'aVL', 10: 'aVF',
-            11: 'V1', 12: 'V2',  13: 'V3',
-            14: 'V4', 15: 'V5',  16: 'V6',
-            17: 'ES', 18: 'AS',  19: 'AI'
-        }
-        return lead_specs[self.lead_spec[lead]]
-
-    # lead_quals = {
-    #     -9: 'absent',
-    #     0: 'unknown',
-    #     1: 'good',
-    #     2: 'intermittent noise',
-    #     3: 'frequent noise',
-    #     4: 'intermittent disconnect',
-    #     5: 'frequent disconnect'
-    # }
 
     # pm_codes = {
     #     0: 'none',
@@ -250,12 +228,18 @@ class Holter:
         else:
             header += (0                     ).to_bytes(6, sys.byteorder)  # TODO?: -9s
         header += (self.nleads               ).to_bytes(2, sys.byteorder)
-        for i in range(12):
-            header += (self.lead_spec[i]     ).to_bytes(2, sys.byteorder, signed=True)
-        for i in range(12):
-            header += (self.lead_quality[i]  ).to_bytes(2, sys.byteorder, signed=True)
-        for i in range(12):
-            header += (self.ampl_res[i]      ).to_bytes(2, sys.byteorder, signed=True)
+        for i in range(self.nleads):
+            header += (self.lead[i].spec     ).to_bytes(2, sys.byteorder, signed=True)
+        for i in range(12-self.nleads):
+            header += (-9                    ).to_bytes(2, sys.byteorder, signed=True)
+        for i in range(self.nleads):
+            header += (self.lead[i].qual     ).to_bytes(2, sys.byteorder, signed=True)
+        for i in range(12-self.nleads):
+            header += (-9                    ).to_bytes(2, sys.byteorder, signed=True)
+        for i in range(self.nleads):
+            header += (self.lead[i].res      ).to_bytes(2, sys.byteorder, signed=True)
+        for i in range(12-self.nleads):
+            header += (-9                    ).to_bytes(2, sys.byteorder, signed=True)
         header += (self.pm                   ).to_bytes(2, sys.byteorder, signed=True)
         header += self.recorder_type       [:40].ljust(40, b'\x00')
         header += (self.sr                   ).to_bytes(2, sys.byteorder)
@@ -273,12 +257,13 @@ class Holter:
         var_block_size will be set to the current length of the variable block
         string.
         """
+        self.magic_number = b'ISHNE1.0'
         try:
             self.var_block_size = len( self.var_block )
         except TypeError:
             self.var_block_size = 0
         try:
-            self.ecg_size = len( self.data[0] )
+            self.ecg_size = len( self.lead[0].data )
             # it's not clear if we should report the total number of samples
             # for *one* lead, or for *all* leads.  we do the former.
         except TypeError:
@@ -287,29 +272,32 @@ class Holter:
         self.ecg_block_offset = 522+self.var_block_size
         self.file_date = datetime.datetime.now().date()
         try:
-            self.nleads = len( self.data )
-            # TODO: if there's only 1 lead, make sure it's still stored as a 2D array
+            self.nleads = len( self.lead )
         except TypeError:
             self.nleads = 0
         # TODO?: checksum.  may break is_valid().
 
         # TODO: enforce proper values (or -9 or whatever) for all fields.  in
-        # particular, lead_spec, lead_quality, and ampl_res need to be -9 for
-        # non-present leads.  sex and race should be zeroed if they're invalid.
+        # particular, lead spec, qual, and res need to be -9 for non-present
+        # leads.  sex and race should be zeroed if they're invalid.  sr >
+        # 0... we can't fix that without knowing it.  set pm to -9 if it's not a
+        # value in pm_codes?
 
-    def write_file(self, overwrite=False):
+    def write_file(self, overwrite=False, convert_data=True):
         """This function will write the object to disk as an ISHNE Holter file.  You do
         *not* need to pre-set the following variables: magic_number, checksum,
         var_block_size, ecg_size, var_block_offset, ecg_block_offset, file_date, and
         nleads.  They will be updated automatically when this function is called.
 
-        By default, it will not overwrite an existing file.
+        By default, this will not overwrite an existing file.
         """
         if os.path.exists(self.filename):
             assert overwrite, "File with that name already exists."
             os.remove(self.filename)  # overwrite is enabled; rm the existing
                                       # file before we start (note: may fail if
                                       # it's a directory not a file)
+        data_counts = [len(lead.data) for lead in self.lead]
+        assert len(set(data_counts)) == 1, "Every lead must have the same number of samples."
 
         # Prepare known/computable values such as variable block offset:
         self.autofill_header()
@@ -323,17 +311,75 @@ class Holter:
             # Header:
             f.write( header )
             # Data block:
-            data = self.data
-            for i in range(len(data)):  # i = lead
-                data[i] *= 1e6/self.ampl_res[i]  # convert measurements back from mV
-            data = np.reshape( data,
-                               self.nleads*len(data[0]),
-                               'F' )
-            data = data.astype(np.int16)
+            data = []
+            for i in range(self.nleads):
+                data += [ self.lead[i].data_int16(convert=convert_data) ]
+            data = np.reshape( data, self.nleads*len(self.lead[0].data), 'F' )
             f.write( data )
 
-    # TODO?: Lead object that keeps lead_spec, lead_quality, ampl_res, and
-    # possibly data for a single lead.  Then keep a single array of Lead objects
-    # in each Holter.
+class Lead:
+    def __init__(self, spec, qual, res):
+        """Store a lead's parameters (name, quality, and amplitude resolution).  Data
+        (samples) from the lead will be loaded by a separate function.
+
+        Keyword arguments:
+        spec -- numeric code from Table 1 of ISHNE Holter spec
+        qual -- numeric code from Table 2 of ISHNE Holter spec
+        res -- this lead's resolution in nV
+        """
+        self.spec = spec
+        self.qual = qual
+        self.res  = res
+        self.data = None
+
+    def save_data(self, data, convert=True):
+        """Replace the data array for this lead with a new one, optionally converting
+        from ISHNE format (int16 samples) to floats (units = mV).
+
+        Keyword arguments:
+        data -- 1d numpy array of samples for this lead
+        convert -- whether sample values should be converted to mV
+        """
+        if convert:
+            data = data.astype(float)
+            data *= self.res/1e6
+        self.data = data
+
+    def data_int16(self, convert=True):
+        """Returns data in the format for saving to disk.  Pointless to use if convert==False."""
+        data = self.data
+        if convert:
+            data *= 1e6/self.res
+            data = data.astype(np.int16)
+        return data
+        # TODO?: maybe do this the other way around, save data unaltered as
+        # int16 and make converted available as e.g. self.data_mV().  That may
+        # reduce possibility of rounding errors during conversions.
+
+    def spec_str(self):
+        """Return this lead's human-readable name (e.g. 'V1')."""
+        lead_specs = {
+            -9: 'absent', 0: 'unknown', 1: 'generic',
+            2: 'X',    3: 'Y',    4: 'Z',
+            5: 'I',    6: 'II',   7: 'III',
+            8: 'aVR',  9: 'aVL', 10: 'aVF',
+            11: 'V1', 12: 'V2',  13: 'V3',
+            14: 'V4', 15: 'V5',  16: 'V6',
+            17: 'ES', 18: 'AS',  19: 'AI'
+        }
+        return lead_specs[self.spec]
+
+    def qual_str(self):
+        """Return a description of this lead's quality (e.g. 'intermittent noise')."""
+        lead_quals = {
+            -9: 'absent',
+            0: 'unknown',
+            1: 'good',
+            2: 'intermittent noise',
+            3: 'frequent noise',
+            4: 'intermittent disconnect',
+            5: 'frequent disconnect'
+        }
+        return lead_quals[self.qual]
 
 ################################################################################
