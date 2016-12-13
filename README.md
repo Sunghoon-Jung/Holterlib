@@ -60,7 +60,7 @@ In the example above, `x` contains the following variables:
 
 Everything except `data` is loaded when `x` is instantiated.  `load_data()` is then called to populate `data` for each lead.
 
-See http://thew-project.org/papers/Badilini.ISHNE.Holter.Standard.pdf to decode the values that use a dictionary.  `get_leadspec()` can decode the ones in `lead_spec`.
+See http://thew-project.org/papers/Badilini.ISHNE.Holter.Standard.pdf to decode the values that use a dictionary, such as the gender, race, and pacemaker fields.  `spec_str()` and `qual_str()` are provided to decode the name and quality of each lead.
 
 ### Who do I talk to? ###
 
