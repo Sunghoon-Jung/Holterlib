@@ -114,8 +114,8 @@ class Holter:
 
     def load_data(self):
         """This may take some time and memory, so we don't do it until we're asked.  The
-        'data' variable is a numpy array indexed as data[lead][sample_number],
-        with values stored in mV.
+        'lead' variable is a list of Lead objects where lead[i].data is the data
+        for lead number i.
         """
         # Get the data:
         with open(self.filename, 'rb') as f:
@@ -172,6 +172,7 @@ class Holter:
         # TODO?: check SR > 0
         return True  # didn't find any problems above
 
+    # TODO?:
     # pm_codes = {
     #     0: 'none',
     #     1: 'unknown type',
@@ -289,15 +290,18 @@ class Holter:
         var_block_size, ecg_size, var_block_offset, ecg_block_offset, file_date, and
         nleads.  They will be updated automatically when this function is called.
 
-        By default, this will not overwrite an existing file.
+        Keyword arguments:
+        overwrite -- whether we should overwrite an existing file
+        convert_data -- whether data needs to be converted back to int16 from float (mV)
         """
+        data_counts = [len(lead.data) for lead in self.lead]
+        assert len(set(data_counts)) == 1, "Every lead must have the same number of samples."
+
         if os.path.exists(self.filename):
             assert overwrite, "File with that name already exists."
             os.remove(self.filename)  # overwrite is enabled; rm the existing
                                       # file before we start (note: may fail if
                                       # it's a directory not a file)
-        data_counts = [len(lead.data) for lead in self.lead]
-        assert len(set(data_counts)) == 1, "Every lead must have the same number of samples."
 
         # Prepare known/computable values such as variable block offset:
         self.autofill_header()
@@ -320,7 +324,7 @@ class Holter:
 class Lead:
     def __init__(self, spec, qual, res):
         """Store a lead's parameters (name, quality, and amplitude resolution).  Data
-        (samples) from the lead will be loaded by a separate function.
+        (samples) from the lead will be loaded separately.
 
         Keyword arguments:
         spec -- numeric code from Table 1 of ISHNE Holter spec
