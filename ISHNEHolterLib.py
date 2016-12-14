@@ -175,8 +175,22 @@ class Holter:
         return True  # didn't find any problems above
 
     def get_length(self):
-        """Return the length of the (first lead of the) Holter as a timedelta object."""
-        return datetime.timedelta(seconds = 1.0 * len(self.lead[0].data) / self.sr)
+        """Return the duration of the Holter as a timedelta object.  If data has already
+        been loaded, duration will be computed as the length of the first lead
+        in memory.  Otherwise, it will be computed from the size of the original
+        file on disk.
+        """
+        try:
+            duration = datetime.timedelta(seconds = 1.0 * len(self.lead[0].data) / self.sr)
+        except TypeError:  # self.lead[0] probably doesn't exist
+            try:
+                filesize = os.path.getsize(self.filename)
+                duration = datetime.timedelta(seconds =
+                    1.0*(filesize - 522 - self.var_block_size) / 2 / self.nleads / self.sr
+                )
+            except OSError:  # probably bad path to original file
+                duration = None
+        return duration
 
     # TODO?:
     # pm_codes = {
