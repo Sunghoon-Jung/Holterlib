@@ -121,7 +121,7 @@ class Holter:
         """
         # Get the data:
         with open(self.filename, 'rb') as f:
-            f.seek(self.var_block_offset, os.SEEK_SET)
+            f.seek(self.ecg_block_offset, os.SEEK_SET)
             data = np.fromfile(f, dtype=np.int16)
         # Convert it to a 2D array, cropping the end if necessary:
         nleads = self.nleads
