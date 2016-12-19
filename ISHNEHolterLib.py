@@ -173,6 +173,8 @@ class Holter:
                 return False
         # TODO?: check SR > 0
         return True  # didn't find any problems above
+        # TODO?: make this function work with in-memory Holter, i.e. not just
+        # one that we loaded from disk.
 
     def get_length(self):
         """Return the duration of the Holter as a timedelta object.  If data has already
