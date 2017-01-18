@@ -74,7 +74,8 @@ class Holter:
             else:
                 result += key + ': ' + str(vars(self)[key]) + '\n'
         return result.rstrip()
-        # TODO: convert gender, race, pacemaker to readable form
+        # TODO: convert gender, race, pacemaker to readable form.  maybe do
+        # ckstr(checksum) too.  units on values?
 
     def load_header(self):
         filename = self.filename
