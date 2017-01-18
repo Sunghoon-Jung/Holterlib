@@ -122,7 +122,7 @@ class Holter:
         for i in range(self.nleads):
             self.lead[i] = Lead(lead_spec[i], lead_quality[i], ampl_res[i])
 
-    def load_data(self):
+    def load_data(self, convert=True):
         """This may take some time and memory, so we don't do it until we're asked.  The
         'lead' variable is a list of Lead objects where lead[i].data is the data
         for lead number i.
@@ -138,7 +138,7 @@ class Holter:
                                 order='F' )
         # Save each row (lead), converting measurements to mV in the process:
         for i in range(nleads):
-            self.lead[i].save_data( data[i] )
+            self.lead[i].save_data( data[i], convert=convert )
 
     def compute_checksum(self, header_block=None):
         """Compute checksum of header block.  If header_block is None, it operates on
