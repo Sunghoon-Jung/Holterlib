@@ -57,10 +57,11 @@ def ckstr(checksum):
 ################################### Classes: ###################################
 
 class Holter:
-    def __init__(self, filename):
+    def __init__(self, filename, check_valid=True):
         self.filename = filename
+        self.beat_anns = []
         self.load_header()
-        if not self.is_valid():
+        if check_valid and not self.is_valid():
             print( "Warning: file appears to be invalid or corrupt. (%s)" % filename )
         # else:
         #     print( "Loaded header successfully.  Remember to run load_data() if you need the data too." )
@@ -71,6 +72,8 @@ class Holter:
         for key in vars(self):
             if key == 'lead':
                 result += 'leads: ' + str([str(l) for l in self.lead]) + '\n'
+            elif key == 'beat_anns':
+                result += 'beat_anns: %d beat annotations\n' % len(self.beat_anns)
             else:
                 result += key + ': ' + str(vars(self)[key]) + '\n'
         return result.rstrip()
@@ -140,6 +143,30 @@ class Holter:
         # Save each row (lead), converting measurements to mV in the process:
         for i in range(nleads):
             self.lead[i].save_data( data[i], convert=convert )
+
+    def load_ann(self, annfile=None):
+        """Load beat annotations in accordance with
+        http://thew-project.org/papers/ishneAnn.pdf.  The path to the annotation
+        file can be specified manually, otherwise we will look for a file with a
+        .ann extension alongside the original ECG.  self.beat_anns is indexed as
+        beat_anns[beat number]['annotation key']."""
+        if annfile==None:
+            annfile = os.path.splitext(self.filename)[0]+'.ann'
+        annheader = Holter(annfile, check_valid=False)
+        # expect wrong/weird/irrelevant stuff in there.  e.g. nleads/sr/ecg_size
+        # are for the original ECG, not the ann file.  var_block offset may be
+        # wrong, magic number is different, ... basically, beware of what you
+        # trust when using annheader below.
+        filesize = os.path.getsize(annfile)
+        headersize = 522 + annheader.var_block_size
+        self.beat_anns = []
+        with open(annfile, 'rb') as f:
+            f.seek(headersize, os.SEEK_SET)
+            for beat in range( int((filesize - headersize) / 4) ):
+                ann      = chr(np.fromfile(f, dtype=np.uint8, count=1)[0])
+                internal =     np.fromfile(f, dtype=np.uint8, count=1)[0]  # may be char?
+                toc      =     np.fromfile(f, dtype=np.int16, count=1)[0]
+                self.beat_anns.append( {'ann': ann, 'internal': internal, 'toc': toc} )
 
     def compute_checksum(self, header_block=None):
         """Compute checksum of header block.  If header_block is None, it operates on
