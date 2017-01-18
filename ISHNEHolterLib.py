@@ -57,8 +57,9 @@ def ckstr(checksum):
 ################################### Classes: ###################################
 
 class Holter:
-    def __init__(self, filename, check_valid=True):
+    def __init__(self, filename, check_valid=True, annfile=False):
         self.filename = filename
+        self.is_annfile = annfile
         self.beat_anns = []
         self.load_header()
         if check_valid and not self.is_valid():
@@ -66,6 +67,7 @@ class Holter:
         # else:
         #     print( "Loaded header successfully.  Remember to run load_data() if you need the data too." )
         # TODO: set up for creating a *new* Holter, not just loading an existing one from a file
+        # TODO: modify/disable parts of whole class appropriately when is_annfile is True.
 
     def __str__(self):
         result = ''
@@ -149,24 +151,31 @@ class Holter:
         http://thew-project.org/papers/ishneAnn.pdf.  The path to the annotation
         file can be specified manually, otherwise we will look for a file with a
         .ann extension alongside the original ECG.  self.beat_anns is indexed as
-        beat_anns[beat number]['annotation key']."""
+        beat_anns[beat number]['key']."""
         if annfile==None:
             annfile = os.path.splitext(self.filename)[0]+'.ann'
-        annheader = Holter(annfile, check_valid=False)
-        # expect wrong/weird/irrelevant stuff in there.  e.g. nleads/sr/ecg_size
-        # are for the original ECG, not the ann file.  var_block offset may be
-        # wrong, magic number is different, ... basically, beware of what you
-        # trust when using annheader below.
+        annheader = Holter(annfile, annfile=True)  # note, var_block_offset may be wrong in .ann files
         filesize = os.path.getsize(annfile)
-        headersize = 522 + annheader.var_block_size
+        headersize = 522 + annheader.var_block_size + 4
         self.beat_anns = []
         with open(annfile, 'rb') as f:
-            f.seek(headersize, os.SEEK_SET)
+            f.seek(headersize-4, os.SEEK_SET)
+            first_sample = np.fromfile(f, dtype=np.uint32, count=1)[0]
+            current_sample = first_sample
+            timeout = False  # was there a gap in the annotations?
             for beat in range( int((filesize - headersize) / 4) ):
+                # note, the beat at first_sample isn't annotated.  so the first beat
+                # in beat_anns is actually the second beat of the recording.
                 ann      = chr(np.fromfile(f, dtype=np.uint8, count=1)[0])
-                internal =     np.fromfile(f, dtype=np.uint8, count=1)[0]  # may be char?
+                internal = chr(np.fromfile(f, dtype=np.uint8, count=1)[0])
                 toc      =     np.fromfile(f, dtype=np.int16, count=1)[0]
+                current_sample += toc
+                if ann == '!':
+                    timeout = True  # there was a few minutes gap in the anns; don't
+                                    # know how to line them up to rest of recording
                 self.beat_anns.append( {'ann': ann, 'internal': internal, 'toc': toc} )
+                if not timeout:
+                    self.beat_anns[-1]['samp_num'] = current_sample
 
     def compute_checksum(self, header_block=None):
         """Compute checksum of header block.  If header_block is None, it operates on
@@ -189,23 +198,27 @@ class Holter:
         """Check for obvious problems with the file: wrong file signature, bad checksum,
         or invalid values for file or header size.
         """
-        if self.magic_number != b'ISHNE1.0':
-            #print ("magic fail")  # debugging
+        # Check magic number:
+        if self.is_annfile: expected_magic_number = b'ANN  1.0'
+        else:               expected_magic_number = b'ISHNE1.0'
+        if self.magic_number != expected_magic_number:
             return False
+        # Var block should always start at 522:
         if self.var_block_offset != 522:
-            #print ("offset fail")  # debugging
             return False
-        filesize = os.path.getsize(self.filename)
-        expected = 522 + self.var_block_size + 2*self.ecg_size
-        if filesize!=expected:
-            # ecg_size may have been reported as samples per lead instead of
-            # total number of samples
-            expected += 2*self.ecg_size*(self.nleads-1)
+        # Check file size.  We have no way to predict this for annotations,
+        # because it depends on heart rate and annotation quality:
+        if not self.is_annfile:
+            filesize = os.path.getsize(self.filename)
+            expected = 522 + self.var_block_size + 2*self.ecg_size
             if filesize!=expected:
-                #print ("size fail")  # debugging
-                return False
+                # ecg_size may have been reported as samples per lead instead of
+                # total number of samples
+                expected += 2*self.ecg_size*(self.nleads-1)
+                if filesize!=expected:
+                    return False
+        # Verify CRC:
         if verify_checksum and (self.checksum != self.compute_checksum()):
-                #print ("checksum fail")  # debugging
                 return False
         # TODO?: check SR > 0
         return True  # didn't find any problems above
