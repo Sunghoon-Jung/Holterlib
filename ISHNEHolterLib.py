@@ -66,6 +66,16 @@ class Holter:
         #     print( "Loaded header successfully.  Remember to run load_data() if you need the data too." )
         # TODO: set up for creating a *new* Holter, not just loading an existing one from a file
 
+    def __str__(self):
+        result = ''
+        for key in vars(self):
+            if key == 'lead':
+                result += 'leads: ' + str([str(l) for l in self.lead]) + '\n'
+            else:
+                result += key + ': ' + str(vars(self)[key]) + '\n'
+        return result.rstrip()
+        # TODO: convert gender, race, pacemaker to readable form
+
     def load_header(self):
         filename = self.filename
         assert os.path.getsize(filename) >= 522, "File is too small to be an ISHNE Holter."
@@ -106,8 +116,6 @@ class Holter:
             self.var_block = get_val(filename, 522, 'a'+str(self.var_block_size)).split('\x00')[0]
         else:
             self.var_block = None
-
-        # TODO?: terminate strings read above at first \x00
 
         # Create array of Leads (where lead specs and data will be stored):
         self.lead = [None for _ in range(self.nleads)]
@@ -357,6 +365,9 @@ class Lead:
         self.qual = qual
         self.res  = res
         self.data = None
+
+    def __str__(self):
+        return self.spec_str()
 
     def save_data(self, data, convert=True):
         """Replace the data array for this lead with a new one, optionally converting
