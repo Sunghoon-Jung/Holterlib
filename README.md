@@ -24,10 +24,8 @@ In Windows: append the library location to the PYTHONPATH variable in System Pro
     x = Holter('some_holter.ecg')
     x.load_data()
     
-    # Delete data from leads other than V2:
-    leadspecs = [ lead.spec_str() for lead in x.lead ]
-    keep = leadspecs.index('V2')
-    x.lead = [ x.lead[keep] ]
+    # Delete leads other than V2:
+    x.lead = [l for l in x.lead if str(l)=='V2']
     
     # Write back to disk:
     x.write_file(overwrite=True)
