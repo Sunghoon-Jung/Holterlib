@@ -90,9 +90,9 @@ class Holter:
         self.var_block_offset =   get_long_int(filename,  18)  # start of variable-length block
         self.ecg_block_offset =   get_long_int(filename,  22)  # start of ECG samples
         self.file_version     =  get_short_int(filename,  26)
-        self.first_name       =        get_val(filename,  28, 'a40').split('\x00')[0]
-        self.last_name        =        get_val(filename,  68, 'a40').split('\x00')[0]
-        self.id               =        get_val(filename, 108, 'a20').split('\x00')[0]
+        self.first_name       =        get_val(filename,  28, 'a40').split(b'\x00')[0]
+        self.last_name        =        get_val(filename,  68, 'a40').split(b'\x00')[0]
+        self.id               =        get_val(filename, 108, 'a20').split(b'\x00')[0]
         self.sex              =  get_short_int(filename, 128)  # 1=male, 2=female
         self.race             =  get_short_int(filename, 130)  # 1=white, 2=black, 3=oriental
         self.birth_date       =   get_datetime(filename, 132)
@@ -104,16 +104,16 @@ class Holter:
         lead_quality          = [get_short_int(filename, 182+i*2) for i in range(12)]
         ampl_res              = [get_short_int(filename, 206+i*2) for i in range(12)]  # lead resolution in nV
         self.pm               =  get_short_int(filename, 230)  # pacemaker
-        self.recorder_type    =        get_val(filename, 232, 'a40').split('\x00')[0]  # analog or digital
+        self.recorder_type    =        get_val(filename, 232, 'a40').split(b'\x00')[0]  # analog or digital
         self.sr               =  get_short_int(filename, 272)  # sample rate in Hz
-        self.proprietary      =        get_val(filename, 274, 'a80').split('\x00')[0]
-        self.copyright        =        get_val(filename, 354, 'a80').split('\x00')[0]
-        self.reserved         =        get_val(filename, 434, 'a88').split('\x00')[0]
+        self.proprietary      =        get_val(filename, 274, 'a80').split(b'\x00')[0]
+        self.copyright        =        get_val(filename, 354, 'a80').split(b'\x00')[0]
+        self.reserved         =        get_val(filename, 434, 'a88').split(b'\x00')[0]
         # TODO?: read all the above with one open()
 
         # Variable-length part of header:
         if self.var_block_size > 0:
-            self.var_block = get_val(filename, 522, 'a'+str(self.var_block_size)).split('\x00')[0]
+            self.var_block = get_val(filename, 522, 'a'+str(self.var_block_size)).split(b'\x00')[0]
         else:
             self.var_block = None
 
