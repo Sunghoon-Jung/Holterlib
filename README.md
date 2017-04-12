@@ -1,6 +1,6 @@
 # ISHNE Holter Library for Python #
 
-This library is useful for working with ISHNE-formatted Holter ECG files in Python.
+A library to work with ISHNE-formatted Holter ECG files
 
 ### Prerequisites ###
 
@@ -10,15 +10,11 @@ This library is useful for working with ISHNE-formatted Holter ECG files in Pyth
 
 ### Installation ###
 
-Add the library's location to your Python path.  In Linux:
-
-    $ export PYTHONPATH=$PYTHONPATH:/path/to/ISHNEHolterLib
-
-In Windows: append the library location to the PYTHONPATH variable in System Properties -> Advanced -> Environment Variables.
+    $ pip3 install ishneholterlib
 
 ### Example ###
 
-    from ISHNEHolterLib import Holter
+    from ishneholterlib import Holter
     
     # Load a file from disk:
     x = Holter('some_holter.ecg')
