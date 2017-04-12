@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup( name='ishneholterlib',
-       version='2017.01.18',
+       version='2017.04.11',
        description='A library to work with ISHNE-formatted Holter ECG files',
        url='https://bitbucket.org/atpage/ishneholterlib',
        author='Alex Page',
