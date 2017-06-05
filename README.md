@@ -33,7 +33,7 @@ In the example above, `x` contains the following variables:
 * `filename`: filename specified when `x` was instantiated
 * `lead`: list of Lead objects, each containing the following:
     * `spec`: lead type, e.g. 11='V1'
-    * `quality`: lead quality, e.g. 3='frequent noise'
+    * `qual`: lead quality, e.g. 3='frequent noise'
     * `res`: lead resolution in nV
     * `data`: 1d array of samples for this lead, in mV
 * `file_version`
