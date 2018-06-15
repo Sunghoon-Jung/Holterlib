@@ -2,58 +2,6 @@
 
 """Reference: http://thew-project.org/papers/Badilini.ISHNE.Holter.Standard.pdf"""
 
-import os
-import numpy as np
-import datetime
-import sys
-from PyCRC.CRCCCITT import CRCCCITT
-
-################################## Functions: ##################################
-
-def get_val(filename, ptr, datatype):
-    """Jump to position 'ptr' in file and read a value of a given type (e.g. int16)."""
-    val = None
-    with open(filename, 'rb') as f:
-        f.seek(ptr, os.SEEK_SET)
-        val = np.fromfile(f, dtype=datatype, count=1)
-        val = val[0]
-    return val
-
-def get_short_int(filename, ptr):
-    """Jump to position 'ptr' in file and read a 16-bit integer."""
-    val = get_val(filename, ptr, np.int16)
-    return int( val )
-
-def get_long_int(filename, ptr):
-    """Jump to position 'ptr' in file and read a 32-bit integer."""
-    val = get_val(filename, ptr, np.int32)
-    return int( val )
-
-def get_datetime(filename, offset, time=False):
-    """Read three consecutive 16-bit values from file and interpret them as (day,
-    month, year) or (hour, minute, second).  Return a date or time object.
-
-    Keyword arguments:
-    filename -- file to read
-    offset -- start address of first value in file
-    time -- True if we're getting (h,m,s), False if we're getting (d,m,y)
-    """
-    a,b,c = [get_short_int(filename, offset+2*i) for i in range(3)]
-    try:
-        if time:
-            output = datetime.time(a,b,c)
-        else:
-            output = datetime.date(c,b,a)
-    except ValueError:
-        output = None
-    return output
-
-def ckstr(checksum):
-    """Return a value as e.g. 'FC8E', i.e. an uppercase hex string with no leading
-    '0x' or trailing 'L'.
-    """
-    return hex(checksum)[2:].rstrip('L').upper()
-
 ################################### Classes: ###################################
 
 class Holter:
@@ -244,18 +192,6 @@ class Holter:
                 duration = None
         return duration
 
-    # TODO?:
-    # pm_codes = {
-    #     0: 'none',
-    #     1: 'unknown type',
-    #     2: 'single chamber unipolar',
-    #     3: 'dual chamber unipolar',
-    #     4: 'single chamber bipolar',
-    #     5: 'dual chamber bipolar',
-    # }
-
-    # TODO: dictionaries for gender and race?
-
     def get_header_bytes(self):
         """Create the ISHNE header from the various instance variables.  The
         variable-length block is included, but the 10 'pre-header' bytes are
@@ -389,35 +325,6 @@ class Holter:
             f.write( data )
 
 class Lead:
-    def __init__(self, spec, qual, res):
-        """Store a lead's parameters (name, quality, and amplitude resolution).  Data
-        (samples) from the lead will be loaded separately.
-
-        Keyword arguments:
-        spec -- numeric code from Table 1 of ISHNE Holter spec
-        qual -- numeric code from Table 2 of ISHNE Holter spec
-        res -- this lead's resolution in nV
-        """
-        self.spec = spec
-        self.qual = qual
-        self.res  = res
-        self.data = None
-
-    def __str__(self):
-        return self.spec_str()
-
-    def save_data(self, data, convert=True):
-        """Replace the data array for this lead with a new one, optionally converting
-        from ISHNE format (int16 samples) to floats (units = mV).
-
-        Keyword arguments:
-        data -- 1d numpy array of samples for this lead
-        convert -- whether sample values should be converted to mV
-        """
-        if convert:
-            data = data.astype(float)
-            data *= self.res/1e6
-        self.data = data
 
     def data_int16(self, convert=True):
         """Returns data in the format for saving to disk.  Pointless to use if convert==False."""
@@ -426,34 +333,5 @@ class Lead:
             data *= 1e6/self.res
             data = data.astype(np.int16)
         return data
-        # TODO?: maybe do this the other way around, save data unaltered as
-        # int16 and make converted available as e.g. self.data_mV().  That may
-        # reduce possibility of rounding errors during conversions.
-
-    def spec_str(self):
-        """Return this lead's human-readable name (e.g. 'V1')."""
-        lead_specs = {
-            -9: 'absent', 0: 'unknown', 1: 'generic',
-            2: 'X',    3: 'Y',    4: 'Z',
-            5: 'I',    6: 'II',   7: 'III',
-            8: 'aVR',  9: 'aVL', 10: 'aVF',
-            11: 'V1', 12: 'V2',  13: 'V3',
-            14: 'V4', 15: 'V5',  16: 'V6',
-            17: 'ES', 18: 'AS',  19: 'AI'
-        }
-        return lead_specs[self.spec]
-
-    def qual_str(self):
-        """Return a description of this lead's quality (e.g. 'intermittent noise')."""
-        lead_quals = {
-            -9: 'absent',
-            0: 'unknown',
-            1: 'good',
-            2: 'intermittent noise',
-            3: 'frequent noise',
-            4: 'intermittent disconnect',
-            5: 'frequent disconnect'
-        }
-        return lead_quals[self.qual]
 
 ################################################################################

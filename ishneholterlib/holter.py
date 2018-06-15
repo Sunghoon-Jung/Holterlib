@@ -9,212 +9,8 @@ import sys
 from PyCRC.CRCCCITT import CRCCCITT
 from ecgplotter import Lead
 
-################################## Functions: ##################################
-
-def get_val(filename, ptr, datatype):
-    """Jump to position 'ptr' in file and read a value of a given type (e.g. int16)."""
-    val = None
-    with open(filename, 'rb') as f:
-        f.seek(ptr, os.SEEK_SET)
-        val = np.fromfile(f, dtype=datatype, count=1)
-        val = val[0]
-    return val
-
-def get_short_int(filename, ptr):
-    """Jump to position 'ptr' in file and read a 16-bit integer."""
-    val = get_val(filename, ptr, np.int16)
-    return int( val )
-
-def get_long_int(filename, ptr):
-    """Jump to position 'ptr' in file and read a 32-bit integer."""
-    val = get_val(filename, ptr, np.int32)
-    return int( val )
-
-def get_datetime(filename, offset, time=False):
-    """Read three consecutive 16-bit values from file and interpret them as (day,
-    month, year) or (hour, minute, second).  Return a date or time object.
-
-    Keyword arguments:
-    filename -- file to read
-    offset -- start address of first value in file
-    time -- True if we're getting (h,m,s), False if we're getting (d,m,y)
-    """
-    a,b,c = [get_short_int(filename, offset+2*i) for i in range(3)]
-    try:
-        if time:
-            output = datetime.time(a,b,c)
-        else:
-            output = datetime.date(c,b,a)
-    except ValueError:
-        output = None
-    return output
-
-def ckstr(checksum):
-    """Return a value as e.g. 'FC8E', i.e. an uppercase hex string with no leading
-    '0x' or trailing 'L'.
-    """
-    return hex(checksum)[2:].rstrip('L').upper()
-
-################################## Constants: ##################################
-
-header_fields = ['file_version', 'first_name', 'last_name', 'id', 'sex', 'race',
-                 'birth_date', 'record_date', 'file_date', 'start_time',
-                 'nleads', 'pm', 'recorder_type', 'sr', 'proprietary',
-                 'copyright', 'reserved']
-
-lead_specs = {
-    -9: 'absent', 0: 'unknown', 1: 'generic',
-    2: 'X',    3: 'Y',    4: 'Z',
-    5: 'I',    6: 'II',   7: 'III',
-    8: 'aVR',  9: 'aVL', 10: 'aVF',
-    11: 'V1', 12: 'V2',  13: 'V3',
-    14: 'V4', 15: 'V5',  16: 'V6',
-    17: 'ES', 18: 'AS',  19: 'AI'
-}
-
-# TODO?:
-# pm_codes = {
-#     0: 'none',
-#     1: 'unknown type',
-#     2: 'single chamber unipolar',
-#     3: 'dual chamber unipolar',
-#     4: 'single chamber bipolar',
-#     5: 'dual chamber bipolar',
-# }
-
-# TODO: dictionaries for gender and race?
-
 ################################### Classes: ###################################
 
-class Header:
-    def __init__(self, filename=None, **kwargs):
-        """kwargs are the values for file_version, first_name, last_name,
-        id, sex, race, birth_date, record_date, file_date, start_time, nleads,
-        pm, recorder_type, sr, proprietary, copyright, and reserved.  They will
-        be ignored if a filename is specified, because the fields will be loaded
-        from the file instead.
-        """
-        self.filename = filename
-        if filename != None:
-            # load fields from disk
-            self.load_header()
-        else:
-            # create new header, not from disk
-            for field in header_fields:
-                if field in kwargs:
-                    setattr(self, field, kwargs[field])
-                else:
-                    setattr(self, field, None)
-            # TODO: initialize any remaining fields with default values
-
-    def load_header(self):
-        filename = self.filename
-        if os.path.getsize(filename) < 522:
-            raise FileNotFoundError("File is too small to be an ISHNE Holter.")
-        self.magic_number = get_val(filename, 0, 'a8')
-        self.checksum = get_val(filename, 8, np.uint16)
-        # Fixed-size part of header:
-        self.var_block_size   =   get_long_int(filename,  10)
-        self.ecg_size         =   get_long_int(filename,  14)  # in number of samples
-        self.var_block_offset =   get_long_int(filename,  18)  # start of variable-length block
-        self.ecg_block_offset =   get_long_int(filename,  22)  # start of ECG samples
-        self.file_version     =  get_short_int(filename,  26)
-        self.first_name       =        get_val(filename,  28, 'a40').split(b'\x00')[0]
-        self.last_name        =        get_val(filename,  68, 'a40').split(b'\x00')[0]
-        self.id               =        get_val(filename, 108, 'a20').split(b'\x00')[0]
-        self.sex              =  get_short_int(filename, 128)  # 1=male, 2=female
-        self.race             =  get_short_int(filename, 130)  # 1=white, 2=black, 3=oriental
-        self.birth_date       =   get_datetime(filename, 132)
-        self.record_date      =   get_datetime(filename, 138)  # recording date
-        self.file_date        =   get_datetime(filename, 144)  # date of creation of output file
-        self.start_time       =   get_datetime(filename, 150, time=True)  # start time of Holter
-        self.nleads           =  get_short_int(filename, 156)
-        self.lead_spec        = [get_short_int(filename, 158+i*2) for i in range(12)]
-        self.lead_spec        = [lead_specs[s] for s in self.lead_spec]
-        self.lead_quality     = [get_short_int(filename, 182+i*2) for i in range(12)]
-        self.ampl_res         = [get_short_int(filename, 206+i*2) for i in range(12)]  # lead resolution in nV
-        self.pm               =  get_short_int(filename, 230)  # pacemaker
-        self.recorder_type    =        get_val(filename, 232, 'a40').split(b'\x00')[0]  # analog or digital
-        self.sr               =  get_short_int(filename, 272)  # sample rate in Hz
-        self.proprietary      =        get_val(filename, 274, 'a80').split(b'\x00')[0]
-        self.copyright        =        get_val(filename, 354, 'a80').split(b'\x00')[0]
-        self.reserved         =        get_val(filename, 434, 'a88').split(b'\x00')[0]
-        # TODO?: read all the above with one open()
-        # Variable-length part of header:
-        if self.var_block_size > 0:
-            self.var_block = get_val(filename, 522, 'a'+str(self.var_block_size)).split(b'\x00')[0]
-        else:
-            self.var_block = None
-        # # Create array of Leads (where lead specs and data will be stored):
-        # self.lead = [None for _ in range(self.nleads)]
-        # for i in range(self.nleads):
-        #     self.lead[i] = Lead(lead_spec[i], lead_quality[i], ampl_res[i])
-
-    def get_header_bytes(self):
-        """Create the ISHNE header from the various instance variables.  The
-        variable-length block is included, but the 10 'pre-header' bytes are
-        not.
-        """
-        # TODO: handle NULLs and fix lead_specs
-        header = bytearray()
-        header += (self.var_block_size       ).to_bytes(4, sys.byteorder)
-        header += (self.ecg_size             ).to_bytes(4, sys.byteorder)
-        header += (self.var_block_offset     ).to_bytes(4, sys.byteorder)
-        header += (self.ecg_block_offset     ).to_bytes(4, sys.byteorder)
-        header += (self.file_version         ).to_bytes(2, sys.byteorder, signed=True)
-        header += self.first_name          [:40].ljust(40, b'\x00')
-        header += self.last_name           [:40].ljust(40, b'\x00')
-        header += self.id                  [:20].ljust(20, b'\x00')
-        header += (self.sex                  ).to_bytes(2, sys.byteorder)
-        header += (self.race                 ).to_bytes(2, sys.byteorder)
-        if self.birth_date:
-            header += (self.birth_date.day   ).to_bytes(2, sys.byteorder)
-            header += (self.birth_date.month ).to_bytes(2, sys.byteorder)
-            header += (self.birth_date.year  ).to_bytes(2, sys.byteorder)
-        else:
-            header += (0                     ).to_bytes(6, sys.byteorder)  # TODO?: -9s
-        if self.record_date:
-            header += (self.record_date.day  ).to_bytes(2, sys.byteorder)
-            header += (self.record_date.month).to_bytes(2, sys.byteorder)
-            header += (self.record_date.year ).to_bytes(2, sys.byteorder)
-        else:
-            header += (0                     ).to_bytes(6, sys.byteorder)  # TODO?: -9s
-        if self.file_date:
-            header += (self.file_date.day    ).to_bytes(2, sys.byteorder)
-            header += (self.file_date.month  ).to_bytes(2, sys.byteorder)
-            header += (self.file_date.year   ).to_bytes(2, sys.byteorder)
-        else:
-            header += (0                     ).to_bytes(6, sys.byteorder)  # TODO?: -9s
-        if self.start_time:
-            header += (self.start_time.hour  ).to_bytes(2, sys.byteorder)
-            header += (self.start_time.minute).to_bytes(2, sys.byteorder)
-            header += (self.start_time.second).to_bytes(2, sys.byteorder)
-        else:
-            header += (0                     ).to_bytes(6, sys.byteorder)  # TODO?: -9s
-        header += (self.nleads               ).to_bytes(2, sys.byteorder)
-        for i in range(self.nleads):
-            header += (self.lead[i].spec     ).to_bytes(2, sys.byteorder, signed=True)
-        for i in range(12-self.nleads):
-            header += (-9                    ).to_bytes(2, sys.byteorder, signed=True)
-        for i in range(self.nleads):
-            header += (self.lead[i].qual     ).to_bytes(2, sys.byteorder, signed=True)
-        for i in range(12-self.nleads):
-            header += (-9                    ).to_bytes(2, sys.byteorder, signed=True)
-        for i in range(self.nleads):
-            header += (self.lead[i].res      ).to_bytes(2, sys.byteorder, signed=True)
-        for i in range(12-self.nleads):
-            header += (-9                    ).to_bytes(2, sys.byteorder, signed=True)
-        header += (self.pm                   ).to_bytes(2, sys.byteorder, signed=True)
-        header += self.recorder_type       [:40].ljust(40, b'\x00')
-        header += (self.sr                   ).to_bytes(2, sys.byteorder)
-        header += self.proprietary         [:80].ljust(80, b'\x00')
-        header += self.copyright           [:80].ljust(80, b'\x00')
-        header += self.reserved            [:88].ljust(88, b'\x00')
-        if self.var_block_size > 0:
-            header += self.var_block
-        return bytes( header )
-
-        
 class Holter:
     """header is a Header object.  leads is a list of Lead objects.  filename is
     where we will read from if those aren't specified, or where we plan to write
@@ -269,9 +65,11 @@ class Holter:
                 Lead(ampl       = data[i],
                      start_time = datetime.datetime.combine(self.header.record_date,
                                                             self.header.start_time),
-                     umV        = 1e6/self.ampl_res[i],
-                     sr         = TODO,
-                     name       = self.lead_spec[i])
+                     umV        = 1e6/self.header.ampl_res[i],  # TODO: ensure float
+                     sr         = self.header.sr,
+                     name       = self.header.lead_spec[i],
+                     notes      = {'quality': self.header.lead_quality[i]},
+                )
             )
         # TODO: store lead_quality in Lead somehow.  (extend the class to add it?)
 
@@ -287,7 +85,6 @@ class Holter:
     #     return result.rstrip()
     #     # TODO: convert gender, race, pacemaker to readable form.  maybe do
     #     # ckstr(checksum) too.  units on values?
-
 
     # def load_ann(self, annfile=None):
     #     """Load beat annotations in accordance with
