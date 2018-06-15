@@ -61,6 +61,7 @@ class Holter:
         self.filename = filename
         self.is_annfile = annfile
         self.beat_anns = []
+        # TODO: if file already exists, we're loading.  else. we're creating new.
         self.load_header()
         if check_valid and not self.is_valid():
             print( "Warning: file appears to be invalid or corrupt. (%s)" % filename )
@@ -219,7 +220,7 @@ class Holter:
                     return False
         # Verify CRC:
         if verify_checksum and (self.checksum != self.compute_checksum()):
-                return False
+            return False
         # TODO?: check SR > 0
         return True  # didn't find any problems above
         # TODO?: make this function work with in-memory Holter, i.e. not just
@@ -264,7 +265,6 @@ class Holter:
         to_bytes().
         """
         header = bytearray()
-
         header += (self.var_block_size       ).to_bytes(4, sys.byteorder)
         header += (self.ecg_size             ).to_bytes(4, sys.byteorder)
         header += (self.var_block_offset     ).to_bytes(4, sys.byteorder)
@@ -320,7 +320,6 @@ class Holter:
         header += self.reserved            [:88].ljust(88, b'\x00')
         if self.var_block_size > 0:
             header += self.var_block
-
         return bytes( header )
 
     def autofill_header(self):
@@ -367,16 +366,13 @@ class Holter:
         """
         data_counts = [len(lead.data) for lead in self.lead]
         assert len(set(data_counts)) == 1, "Every lead must have the same number of samples."
-
         if os.path.exists(self.filename):
             assert overwrite, "File with that name already exists."
             os.remove(self.filename)  # overwrite is enabled; rm the existing
                                       # file before we start (note: may fail if
                                       # it's a directory not a file)
-
         # Prepare known/computable values such as variable block offset:
         self.autofill_header()
-
         # Write file:
         with open(self.filename, 'ab') as f:
             header = self.get_header_bytes()
