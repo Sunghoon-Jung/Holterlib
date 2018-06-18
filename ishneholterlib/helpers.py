@@ -1,13 +1,6 @@
-#!/usr/bin/env python3
-
-"""Reference: http://thew-project.org/papers/Badilini.ISHNE.Holter.Standard.pdf"""
-
 import os
 import numpy as np
 import datetime
-import sys
-
-################################## Functions: ##################################
 
 def get_val(filename, ptr, datatype):
     """Jump to position 'ptr' in file and read a value of a given type (e.g. int16)."""
@@ -52,5 +45,3 @@ def ckstr(checksum):
     '0x' or trailing 'L'.
     """
     return hex(checksum)[2:].rstrip('L').upper()
-
-################################################################################

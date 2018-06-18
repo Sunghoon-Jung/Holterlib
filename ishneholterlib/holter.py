@@ -40,6 +40,10 @@ class Holter:
             else:              self.lead = []
             if header != None: self.header = header
             else:              self.header = Header()
+        # # Create array of Leads (where lead specs and data will be stored):
+        # self.lead = [None for _ in range(self.nleads)]
+        # for i in range(self.nleads):
+        #     self.lead[i] = Lead(lead_spec[i], lead_quality[i], ampl_res[i])
         # if check_valid and not self.is_valid():
         #     raise Warning( "File appears to be invalid or corrupt. (%s)" % filename )
         # # TODO: modify/disable parts of whole class appropriately when is_annfile is True.
@@ -68,7 +72,7 @@ class Holter:
                      umV        = 1e6/self.header.ampl_res[i],  # TODO: ensure float
                      sr         = self.header.sr,
                      name       = self.header.lead_spec[i],
-                     notes      = {'quality': self.header.lead_quality[i]},
+                     notes      = {'quality': self.header.lead_quality[i]},  # TODO: store resolution too?
                 )
             )
         # TODO: store lead_quality in Lead somehow.  (extend the class to add it?)
@@ -216,6 +220,14 @@ class Holter:
         # 0... we can't fix that without knowing it.  set pm to -9 if it's not a
         # value in pm_codes?
 
+    # def data_int16(self, convert=True):
+    #     """Returns data in the format for saving to disk.  Pointless to use if convert==False."""
+    #     data = self.data
+    #     if convert:
+    #         data *= 1e6/self.res
+    #         data = data.astype(np.int16)
+    #     return data
+        
     def write_file(self, overwrite=False, convert_data=True):
         """This function will write the object to disk as an ISHNE Holter file.  You do
         *not* need to pre-set the following variables: magic_number, checksum,
