@@ -3,14 +3,15 @@
 import os
 import numpy as np
 import sys
-from .helpers import get_val, get_short_int, get_long_int, get_datetime
-from .constants import header_field_defaults
+from .helpers import get_val, get_short_int, get_long_int, get_datetime, \
+    bytes_from_datetime, bytes_from_lead_names, bytes_from_lead_resolutions
+from .constants import header_field_defaults, lead_specs
 
 class Header:
     def __init__(self, filename=None, **kwargs):
         """Create a new ISHNE Holter Header, either from disk or from provided
         arguments.  If filename is set, all other args will be ignored.  Default
-        values (e.g. None or '') will be used for any args not provided.
+        values (e.g. None, '', or -9) will be used for any args not provided.
 
         Keyword arguments:
         filename -- file to load the header from
@@ -44,6 +45,8 @@ class Header:
                     setattr(self, field, header_field_defaults[field])  # default value like None
 
     def load_header(self):
+        """Note: many of the fields will be ignored in a normal workflow.  For example,
+        self.nleads is not as reliable as len(holter.lead)."""
         filename = self.filename
         if os.path.getsize(filename) < 522:
             raise FileNotFoundError("File is too small to be an ISHNE Holter.")
@@ -52,7 +55,7 @@ class Header:
         self.checksum = get_val(filename, 8, np.uint16)
         # Fixed-size part of header:
         var_block_size     =   get_long_int(filename,  10)
-        self.ecg_size      =   get_long_int(filename,  14)  # in number of samples
+        ecg_size           =   get_long_int(filename,  14)  # in number of samples
         var_block_offset   =   get_long_int(filename,  18)  # start of variable-length block
         ecg_block_offset   =   get_long_int(filename,  22)  # start of ECG samples
         self.file_version  =  get_short_int(filename,  26)
@@ -65,14 +68,13 @@ class Header:
         self.record_date   =   get_datetime(filename, 138)  # recording date
         self.file_date     =   get_datetime(filename, 144)  # date of creation of output file
         self.start_time    =   get_datetime(filename, 150, time=True)  # start time of Holter
-        nleads             =  get_short_int(filename, 156)
+        self.nleads        =  get_short_int(filename, 156)
         self.lead_spec     = [get_short_int(filename, 158+i*2) for i in range(12)]
         self.lead_quality  = [get_short_int(filename, 182+i*2) for i in range(12)]
         self.ampl_res      = [get_short_int(filename, 206+i*2) for i in range(12)]  # lead resolution in nV
-        # TODO: don't store spec/quality/res in header; they will be stored in Leads
         self.pm            =  get_short_int(filename, 230)  # pacemaker
         self.recorder_type =        get_val(filename, 232, 'a40').split(b'\x00')[0]  # analog or digital
-        sr                 =  get_short_int(filename, 272)  # sample rate in Hz
+        self.sr            =  get_short_int(filename, 272)  # sample rate in Hz
         self.proprietary   =        get_val(filename, 274, 'a80').split(b'\x00')[0]
         self.copyright     =        get_val(filename, 354, 'a80').split(b'\x00')[0]
         self.reserved      =        get_val(filename, 434, 'a88').split(b'\x00')[0]
@@ -100,13 +102,10 @@ class Header:
         leads -- list of Lead objects associated with this Header
         """
         # TODO?: make this a function of (header,leads) and put somewhere else
-
         if len(set([l.sr        for l in leads])) != 1 or \
            len(set([l.time[0]   for l in leads])) != 1 or \
            len(set([len(l.ampl) for l in leads])) != 1:
             raise ValueError("Leads must be same length and sample rate, and start at the same time.")
-        # TODO: leads must store umV, name, quality
-        
         header = bytearray()
         header += (len(self.var_block)       ).to_bytes(4, sys.byteorder)
         header += (len(leads[0].ampl)        ).to_bytes(4, sys.byteorder)
@@ -118,52 +117,14 @@ class Header:
         header += self.id                  [:20].ljust(20, b'\x00')
         header += (self.sex                  ).to_bytes(2, sys.byteorder)
         header += (self.race                 ).to_bytes(2, sys.byteorder)
-        if self.birth_date:
-            header += (self.birth_date.day   ).to_bytes(2, sys.byteorder)
-            header += (self.birth_date.month ).to_bytes(2, sys.byteorder)
-            header += (self.birth_date.year  ).to_bytes(2, sys.byteorder)
-        else:
-            header += (0                     ).to_bytes(6, sys.byteorder)  # TODO?: -9s
-        if self.record_date:
-            header += (self.record_date.day  ).to_bytes(2, sys.byteorder)
-            header += (self.record_date.month).to_bytes(2, sys.byteorder)
-            header += (self.record_date.year ).to_bytes(2, sys.byteorder)
-        else:
-            header += (0                     ).to_bytes(6, sys.byteorder)  # TODO?: -9s
-        if self.file_date:
-            header += (self.file_date.day    ).to_bytes(2, sys.byteorder)
-            header += (self.file_date.month  ).to_bytes(2, sys.byteorder)
-            header += (self.file_date.year   ).to_bytes(2, sys.byteorder)
-        else:
-            header += (0                     ).to_bytes(6, sys.byteorder)  # TODO?: -9s
-        if self.start_time:
-            header += (self.start_time.hour  ).to_bytes(2, sys.byteorder)
-            header += (self.start_time.minute).to_bytes(2, sys.byteorder)
-            header += (self.start_time.second).to_bytes(2, sys.byteorder)
-        else:
-            header += (0                     ).to_bytes(6, sys.byteorder)  # TODO?: -9s
+        header += bytes_from_datetime(self.birth_date) #6
+        header += bytes_from_datetime(self.record_date)#6
+        header += bytes_from_datetime(self.file_date)  #6
+        header += bytes_from_datetime(self.start_time) #6
         header += (len(leads)                ).to_bytes(2, sys.byteorder)
-
-        
-        # TODO: from Leads, will need reverse lookup:
-        for l in leads:
-            header += (l.name_TODO_TO_KEY    ).to_bytes(2, sys.byteorder, signed=True)
-        for i in range(12-len(leads)):
-            header += (-9                    ).to_bytes(2, sys.byteorder, signed=True)
-
-        # TODO: from Leads, will need reverse lookup:
-        for l in leads:
-            header += (self.lead[i].qual     ).to_bytes(2, sys.byteorder, signed=True)
-        for i in range(12-len(leads)):
-            header += (-9                    ).to_bytes(2, sys.byteorder, signed=True)
-            
-        # TODO: from Leads, will need reverse lookup:
-        for l in leads:
-            header += (self.lead[i].res      ).to_bytes(2, sys.byteorder, signed=True)
-        for i in range(12-len(leads)):
-            header += (-9                    ).to_bytes(2, sys.byteorder, signed=True)
-
-            
+        header += bytes_from_lead_names(leads)        #24
+        header += bytes_from_lead_qualities(leads)    #24
+        header += bytes_from_lead_resolutions(leads)  #24
         header += (self.pm                   ).to_bytes(2, sys.byteorder, signed=True)
         header += self.recorder_type       [:40].ljust(40, b'\x00')
         header += (leads[0].sr               ).to_bytes(2, sys.byteorder)

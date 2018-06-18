@@ -8,6 +8,7 @@ import datetime
 import sys
 from PyCRC.CRCCCITT import CRCCCITT
 from ecgplotter import Lead
+from .constants import lead_qualities
 
 ################################### Classes: ###################################
 
@@ -72,7 +73,9 @@ class Holter:
                      umV        = 1e6/self.header.ampl_res[i],  # TODO: ensure float
                      sr         = self.header.sr,
                      name       = self.header.lead_spec[i],
-                     notes      = {'quality': self.header.lead_quality[i]},  # TODO: store resolution too?
+                     notes      = {
+                         'quality': lead_qualities[self.header.lead_quality[i]],  # TODO
+                     },
                 )
             )
         # TODO: store lead_quality in Lead somehow.  (extend the class to add it?)
