@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """Reference: http://thew-project.org/papers/Badilini.ISHNE.Holter.Standard.pdf"""
 
 import os
@@ -8,11 +6,235 @@ import datetime
 import sys
 from PyCRC.CRCCCITT import CRCCCITT
 from ecgplotter import Lead
-from .constants import lead_qualities
-
-################################### Classes: ###################################
+from .constants import header_field_defaults, lead_specs, lead_qualities
+from .helpers import get_val, get_short_int, get_long_int, get_datetime, \
+    bytes_from_datetime, bytes_from_lead_names, bytes_from_lead_resolutions
 
 class Holter:
+    def __init__(self, filename=None, leads=[], is_annfile=False, **kwargs):
+        """Create a new ISHNE Holter, either from disk or from provided arguments.  If
+        filename is set, all other args will be ignored.  Default values
+        (e.g. None, '', or -9) will be used for any args not provided.  If
+        loading from disk, only the header will be parsed.  To load the rest of
+        the data, run load_data().
+
+        Keyword arguments:
+        filename -- file to load
+        leads -- list of Lead objects or annotations (optional)
+        is_annfile -- set True if this is for annotations (not voltages)
+
+        Further arguments for file header:
+        file_version -- integer
+        first_name -- string
+        last_name -- string
+        id -- string
+        sex -- integer key for constants.gender_codes
+        race -- integer key for constants.race_codes
+        birth_date -- datetime.date
+        pm -- integer key for constants.pm_codes
+        recorder_type -- string (e.g. 'analog' or 'digital')
+        proprietary -- string
+        copyright -- string
+        reserved -- string
+        var_block -- string
+        """
+        self.filename = filename
+        if filename != None:
+            # load fields from disk
+            self.load_header()
+        else:
+            # create new Holter, not from disk
+            for field in header_field_defaults:
+                if field in kwargs:
+                    setattr(self, field, kwargs[field])  # user specified value
+                else:
+                    setattr(self, field, header_field_defaults[field])  # default value like None
+            self.lead = leads
+
+    def load_header(self):
+        """Load header from disk.  Note: many of the fields will be ignored in a normal
+        workflow.  For example, nleads and start_time are not as reliable as
+        len(lead) and lead[0].time[0].
+        """
+        filename = self.filename
+        if os.path.getsize(filename) < 522:
+            raise FileNotFoundError("File is too small to be an ISHNE Holter.")
+        # "Pre"-header:
+        self.magic_number = get_val(filename, 0, 'a8')
+        self.checksum = get_val(filename, 8, np.uint16)
+        # Fixed-size part of header:
+        self.var_block_size   =   get_long_int(filename,  10)
+        self.ecg_size         =   get_long_int(filename,  14)  # in number of samples
+        self.var_block_offset =   get_long_int(filename,  18)  # start of variable-length block
+        self.ecg_block_offset =   get_long_int(filename,  22)  # start of ECG samples
+        self.file_version     =  get_short_int(filename,  26)
+        self.first_name       =        get_val(filename,  28, 'a40').split(b'\x00')[0]
+        self.last_name        =        get_val(filename,  68, 'a40').split(b'\x00')[0]
+        self.id               =        get_val(filename, 108, 'a20').split(b'\x00')[0]
+        self.sex              =  get_short_int(filename, 128)  # 1=male, 2=female
+        self.race             =  get_short_int(filename, 130)  # 1=white, 2=black, 3=oriental
+        self.birth_date       =   get_datetime(filename, 132)
+        self.record_date      =   get_datetime(filename, 138)  # recording date
+        self.file_date        =   get_datetime(filename, 144)  # date of creation of output file
+        self.start_time       =   get_datetime(filename, 150, time=True)  # start time of Holter
+        self.nleads           =  get_short_int(filename, 156)
+        self.lead_spec        = [get_short_int(filename, 158+i*2) for i in range(12)]
+        self.lead_quality     = [get_short_int(filename, 182+i*2) for i in range(12)]
+        self.ampl_res         = [get_short_int(filename, 206+i*2) for i in range(12)]  # lead resolution in nV
+        self.pm               =  get_short_int(filename, 230)  # pacemaker
+        self.recorder_type    =        get_val(filename, 232, 'a40').split(b'\x00')[0]  # analog or digital
+        self.sr               =  get_short_int(filename, 272)  # sample rate in Hz
+        self.proprietary      =        get_val(filename, 274, 'a80').split(b'\x00')[0]
+        self.copyright        =        get_val(filename, 354, 'a80').split(b'\x00')[0]
+        self.reserved         =        get_val(filename, 434, 'a88').split(b'\x00')[0]
+        # TODO?: read all the above with one open()
+        if var_block_offset != 522 or \
+           ecg_block_offset != 522+var_block_size:
+            raise ValueError("File header contains an invalid value.")
+        # Variable-length part of header:
+        if var_block_size > 0:
+            self.var_block = get_val(filename, 522, 'a'+str(var_block_size)).split(b'\x00')[0]
+        else:
+            self.var_block = header_field_defaults['var_block']
+        if not self.header_is_valid():
+            raise RuntimeWarning("File header appears corrupt.")
+
+    def header_is_valid(self, verify_checksum=True):
+        """Check for obvious problems with the header, i.e. wrong file signature or
+        checksum.  We don't check for nonsensical values of fields like gender
+        or DOB.  This function should normally only be run immediately after
+        loading a file.
+        """
+        # Check magic number:
+        if self.is_annfile: expected_magic_number = b'ANN  1.0'
+        else:               expected_magic_number = b'ISHNE1.0'
+        if self.magic_number != expected_magic_number:
+            return False
+        # Verify CRC:
+        if verify_checksum and (self.checksum != self.compute_checksum()):
+            return False
+        # TODO?: check for SR<=0, 1>nleads>12, ecg_size<0, var_block_size<0, ampl_res<=0
+        return True  # didn't find any problems above
+
+    def compute_checksum(self):
+        """Compute checksum of header block (typically bytes 10-522 of the file)."""
+        header_block = self.get_header_bytes()  # .tostring()
+        return np.uint16( CRCCCITT(version='FFFF').calculate(header_block) )
+        # Another method to do the calculation:
+        #   from crccheck.crc import Crc16CcittFalse
+        #   Crc16CcittFalse.calc( header_block )
+
+    # # TODO: check somewhere:
+    #     # Check file size.  We have no way to predict this for annotations,
+    #     # because it depends on heart rate and annotation quality:
+    #     if not self.is_annfile:
+    #         filesize = os.path.getsize(self.filename)
+    #         expected = 522 + self.var_block_size + 2*self.ecg_size  # ecg_size = total number of samples
+    #         if filesize != expected:
+    #             expected += 2*self.ecg_size*(self.nleads-1)  # ecg_size = number of samples for 1 lead
+    #             if filesize != expected:
+    #                 return False
+    # if len(set([l.sr        for l in leads])) != 1 or \
+    #    len(set([l.time[0]   for l in leads])) != 1 or \
+    #    len(set([len(l.ampl) for l in leads])) != 1:
+    #     raise ValueError("Leads must be same length and sample rate, and start at the same time.")
+
+    def get_header_bytes(self):
+        """Create the (byte array) ISHNE header from the various instance variables.
+        The variable-length block is included, but the 10 'pre-header' bytes are
+        not.
+
+        Note: We use the convention that ecg_size is the number of samples in ONE
+        lead.  Some software may instead expect ecg_size to be the total number of
+        samples including ALL leads.  The specification document is not clear which
+        convention should be used.
+        """
+
+        # TODO: different mode for header loaded from disk (i.e. when self.lead
+        # is still empty)
+        self.update_header()
+
+
+
+        header_bytes = bytearray()
+        header_bytes += (len(self.var_block)            ).to_bytes(4, sys.byteorder)
+        header_bytes += (len(leads[0].ampl)               ).to_bytes(4, sys.byteorder)
+        header_bytes += (522                              ).to_bytes(4, sys.byteorder)
+        header_bytes += (522+len(self.var_block)        ).to_bytes(4, sys.byteorder)
+        header_bytes += (self.file_version              ).to_bytes(2, sys.byteorder, signed=True)
+        header_bytes += self.first_name               [:40].ljust(40, b'\x00')
+        header_bytes += self.last_name                [:40].ljust(40, b'\x00')
+        header_bytes += self.id                       [:20].ljust(20, b'\x00')
+        header_bytes += (self.sex                       ).to_bytes(2, sys.byteorder)
+        header_bytes += (self.race                      ).to_bytes(2, sys.byteorder)
+        header_bytes += bytes_from_datetime(self.birth_date)      #6
+        header_bytes += bytes_from_datetime(leads[0].time[0].date())#6
+        header_bytes += bytes_from_datetime(self.file_date)       #6
+        header_bytes += bytes_from_datetime(leads[0].time[0].time())#6
+        header_bytes += (len(leads)                       ).to_bytes(2, sys.byteorder)
+        header_bytes += bytes_from_lead_names(leads)               #24
+        header_bytes += bytes_from_lead_qualities(leads)           #24
+        header_bytes += bytes_from_lead_resolutions(leads)         #24
+        header_bytes += (self.pm                        ).to_bytes(2, sys.byteorder, signed=True)
+        header_bytes += self.recorder_type            [:40].ljust(40, b'\x00')
+        header_bytes += (leads[0].sr                      ).to_bytes(2, sys.byteorder)
+        header_bytes += self.proprietary              [:80].ljust(80, b'\x00')
+        header_bytes += self.copyright                [:80].ljust(80, b'\x00')
+        header_bytes += self.reserved                 [:88].ljust(88, b'\x00')
+        if len(self.var_block) > 0:
+            header_bytes += self.var_block
+        return bytes( header_bytes )
+
+    def update_header(self):
+        """Update header fields based on Lead data."""
+        leads = self.lead
+        if len(leads) != 0:
+            self.ecg_size     = len(leads[0].ampl)
+            self.record_date  = leads[0].time[0].date()
+            self.start_time   = leads[0].time[0].time()
+            self.nleads       = len(leads)
+            self.lead_spec    = [val_to_key(lead_specs,l.name,0) for l in leads]
+            self.lead_quality = [val_to_key(lead_qualities,l.notes['quality'],0) for l in leads]
+            self.ampl_res     = lead_resolutions_nv(leads)
+            self.sr           = leads[0].sr
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     def __init__(self, filename=None, header=None, leads=None, check_valid=True, annfile=False, load_data=False):
         """header is a Header object.  leads is a list of Lead objects.  filename is
         where we will read from if those aren't specified, or where we plan to
@@ -79,62 +301,8 @@ class Holter:
                 )
             )
         # TODO: store lead_quality in Lead somehow.  (extend the class to add it?)
-        
-    def get_header_bytes(self):
-        """Create the (byte array) ISHNE header from the various instance variables.
-        The variable-length block is included, but the 10 'pre-header' bytes are
-        not.
-    
-        Note: We use the convention that ecg_size is the number of samples in ONE
-        lead.  Some software may instead expect ecg_size to be the total number of
-        samples including ALL leads.  The specification document is not clear which
-        convention should be used.
-    
-        Keyword arguments:
-        header -- Header object
-        leads  -- list of Lead objects associated with the Header
-        """
-        header, leads = self.header, self.leads
-        if len(set([l.sr        for l in leads])) != 1 or \
-           len(set([l.time[0]   for l in leads])) != 1 or \
-           len(set([len(l.ampl) for l in leads])) != 1:
-            raise ValueError("Leads must be same length and sample rate, and start at the same time.")
-        header_bytes = bytearray()
-        header_bytes += (len(header.var_block)            ).to_bytes(4, sys.byteorder)
-        header_bytes += (len(leads[0].ampl)               ).to_bytes(4, sys.byteorder)
-        header_bytes += (522                              ).to_bytes(4, sys.byteorder)
-        header_bytes += (522+len(header.var_block)        ).to_bytes(4, sys.byteorder)
-        header_bytes += (header.file_version              ).to_bytes(2, sys.byteorder, signed=True)
-        header_bytes += header.first_name               [:40].ljust(40, b'\x00')
-        header_bytes += header.last_name                [:40].ljust(40, b'\x00')
-        header_bytes += header.id                       [:20].ljust(20, b'\x00')
-        header_bytes += (header.sex                       ).to_bytes(2, sys.byteorder)
-        header_bytes += (header.race                      ).to_bytes(2, sys.byteorder)
-        header_bytes += bytes_from_datetime(header.birth_date)      #6
-        header_bytes += bytes_from_datetime(leads[0].time[0].date())#6
-        header_bytes += bytes_from_datetime(header.file_date)       #6
-        header_bytes += bytes_from_datetime(leads[0].time[0].time())#6
-        header_bytes += (len(leads)                       ).to_bytes(2, sys.byteorder)
-        header_bytes += bytes_from_lead_names(leads)               #24
-        header_bytes += bytes_from_lead_qualities(leads)           #24
-        header_bytes += bytes_from_lead_resolutions(leads)         #24
-        header_bytes += (header.pm                        ).to_bytes(2, sys.byteorder, signed=True)
-        header_bytes += header.recorder_type            [:40].ljust(40, b'\x00')
-        header_bytes += (leads[0].sr                      ).to_bytes(2, sys.byteorder)
-        header_bytes += header.proprietary              [:80].ljust(80, b'\x00')
-        header_bytes += header.copyright                [:80].ljust(80, b'\x00')
-        header_bytes += header.reserved                 [:88].ljust(88, b'\x00')
-        if len(header.var_block) > 0:
-            header_bytes += header.var_block
-        return bytes( header_bytes )
 
-    def compute_checksum(self):
-        """Compute checksum of header block (typically bytes 10-522 of the file)."""
-        header_block = self.get_header_bytes()  # .tostring()
-        return np.uint16( CRCCCITT(version='FFFF').calculate(header_block) )
-        # Another method to do the calculation:
-        #   from crccheck.crc import Crc16CcittFalse
-        #   Crc16CcittFalse.calc( header_block )
+
 
     # def __str__(self):
     #     result = ''
@@ -180,36 +348,6 @@ class Holter:
     #             if not timeout:
     #                 self.beat_anns[-1]['samp_num'] = current_sample
 
-    # def is_valid(self, verify_checksum=True):
-    #     """Check for obvious problems with the file: wrong file signature, bad checksum,
-    #     or invalid values for file or header size.
-    #     """
-    #     # Check magic number:
-    #     if self.is_annfile: expected_magic_number = b'ANN  1.0'
-    #     else:               expected_magic_number = b'ISHNE1.0'
-    #     if self.magic_number != expected_magic_number:
-    #         return False
-    #     # Var block should always start at 522:
-    #     if self.var_block_offset != 522:
-    #         return False
-    #     # Check file size.  We have no way to predict this for annotations,
-    #     # because it depends on heart rate and annotation quality:
-    #     if not self.is_annfile:
-    #         filesize = os.path.getsize(self.filename)
-    #         expected = 522 + self.var_block_size + 2*self.ecg_size
-    #         if filesize!=expected:
-    #             # ecg_size may have been reported as samples per lead instead of
-    #             # total number of samples
-    #             expected += 2*self.ecg_size*(self.nleads-1)
-    #             if filesize!=expected:
-    #                 return False
-    #     # Verify CRC:
-    #     if verify_checksum and (self.checksum != self.compute_checksum()):
-    #         return False
-    #     # TODO?: check SR > 0
-    #     return True  # didn't find any problems above
-    #     # TODO?: make this function work with in-memory Holter, i.e. not just
-    #     # one that we loaded from disk.
 
     # def get_length(self):
     #     """Return the duration of the Holter as a timedelta object.  If data has already
@@ -270,7 +408,7 @@ class Holter:
             data *= 1e6/self.res
             data = data.astype(np.int16)
         return data
-        
+
     def write_file(self, overwrite=False, convert_data=True):
         """This function will write the object to disk as an ISHNE Holter file.  You do
         *not* need to pre-set the following variables: magic_number, checksum,
@@ -304,5 +442,3 @@ class Holter:
                 data += [ self.lead[i].data_int16(convert=convert_data) ]
             data = np.reshape( data, self.nleads*len(self.lead[0].data), 'F' )
             f.write( data )
-
-################################################################################

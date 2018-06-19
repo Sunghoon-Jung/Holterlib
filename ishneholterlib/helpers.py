@@ -122,6 +122,7 @@ def val_to_key(d, v, default_k):
     Keyword arguments:
     d -- dict to search
     v -- value to search for
+    default_k -- return value if v not found
     """
     if v in d.values():
         for key,val in d.items():
