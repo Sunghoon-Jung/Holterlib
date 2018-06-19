@@ -1,11 +1,5 @@
 """Reference: http://thew-project.org/papers/Badilini.ISHNE.Holter.Standard.pdf"""
 
-# # fields that may be set/edited by the user
-# header_fields = ['file_version', 'first_name', 'last_name', 'id', 'sex', 'race',
-#                  'birth_date', 'record_date', 'file_date', 'start_time',
-#                  'nleads', 'pm', 'recorder_type', 'sr', 'proprietary',
-#                  'copyright', 'reserved']
-
 # default values for fields that may be set/edited by the user
 header_field_defaults = {
     'file_version':  -9,
@@ -15,9 +9,6 @@ header_field_defaults = {
     'sex':           0,
     'race':          0,
     'birth_date':    None,
-    'record_date':   None,  # TODO: redundant with Lead; remove
-    'file_date':     None,  # TODO?: user doesn't need to manage this
-    'start_time':    None,  # TODO: redundant with Lead; remove
     'pm':            -9,
     'recorder_type': '',  # TODO?: 'unknown'
     'proprietary':   '',
@@ -50,7 +41,7 @@ lead_qualities = {
 
 # type of pacemaker
 pm_codes = {
-    0: 'none',
+    0: 'none',  # i.e. no PM installed.  so -9 should be used for unknown.
     1: 'unknown type',
     2: 'single chamber unipolar',
     3: 'dual chamber unipolar',
@@ -64,7 +55,7 @@ gender_codes = {
     2: 'F'
 }
 
-# other codes (e.g. 4+) may also be used for race, but weren't in the initial spec
+# race codes.  other values (e.g. 4+) may also be used, but weren't in the initial spec
 race_codes = {
     0: None,  # unknown
     1: 'caucasian',

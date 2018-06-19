@@ -1,10 +1,11 @@
 import os
 import sys
+import math
 import numpy as np
 import datetime
 from .constants import lead_specs, lead_qualities
 
-###################### reading values from file on disk: #######################
+########################## reading values from file: ###########################
 
 def get_val(filename, ptr, datatype):
     """Jump to position 'ptr' in file and read a value of a given type (e.g. int16)."""
@@ -44,7 +45,7 @@ def get_datetime(filename, offset, time=False):
         output = None
     return output
 
-################## preparing to write values to file on disk: ##################
+###################### preparing to write values to file: ######################
 
 def bytes_from_datetime(dt):
     """Convert a datetime back into a sequence of bytes, e.g. when writing a header
@@ -102,7 +103,7 @@ def lead_resolutions_nv(leads):
     resolutions = []
     for l in leads:
         try:
-            res = int(1e6/l.umV)
+            res = int(1e6/l.original_umV)
         except:
             # handle the case where l.umV is not set.  there are many ways to do
             # this; i simply divide the used range among the 16 bits.  TODO: do
@@ -110,7 +111,7 @@ def lead_resolutions_nv(leads):
             # interp), maybe preserve zero, set range based on statistical
             # outliers, etc.
             full_range_mv = max(l.ampl) - min(l.ampl)
-            res = int(1e6 * full_range_mv / 2**16)
+            res = math.ceil(1e6 * full_range_mv / 2**16)
         resolutions.append(res)
     return resolutions
 

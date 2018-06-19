@@ -22,9 +22,6 @@ class Header:
         sex -- integer key for constants.gender_codes
         race -- integer key for constants.race_codes
         birth_date -- datetime.date
-        record_date -- datetime.date
-        file_date -- datetime.date
-        start_time -- datetime.time
         pm -- integer key for constants.pm_codes
         recorder_type -- string (e.g. 'analog' or 'digital')
         proprietary -- string
@@ -87,50 +84,3 @@ class Header:
             self.var_block = get_val(filename, 522, 'a'+str(var_block_size)).split(b'\x00')[0]
         else:
             self.var_block = header_field_defaults['var_block']
-
-    def get_header_bytes(self, leads):
-        """Create the (byte array) ISHNE header from the various instance variables.
-        The variable-length block is included, but the 10 'pre-header' bytes are
-        not.
-
-        Note: We use the convention that ecg_size is the number of samples in
-        ONE lead.  Some software may instead expect ecg_size to be the total
-        number of samples including ALL leads.  The specification document is
-        not clear which convention should be used.
-
-        Keyword arguments:
-        leads -- list of Lead objects associated with this Header
-        """
-        # TODO?: make this a function of (header,leads) and put somewhere else
-        if len(set([l.sr        for l in leads])) != 1 or \
-           len(set([l.time[0]   for l in leads])) != 1 or \
-           len(set([len(l.ampl) for l in leads])) != 1:
-            raise ValueError("Leads must be same length and sample rate, and start at the same time.")
-        header = bytearray()
-        header += (len(self.var_block)       ).to_bytes(4, sys.byteorder)
-        header += (len(leads[0].ampl)        ).to_bytes(4, sys.byteorder)
-        header += (522                       ).to_bytes(4, sys.byteorder)
-        header += (522+len(self.var_block)   ).to_bytes(4, sys.byteorder)
-        header += (self.file_version         ).to_bytes(2, sys.byteorder, signed=True)
-        header += self.first_name          [:40].ljust(40, b'\x00')
-        header += self.last_name           [:40].ljust(40, b'\x00')
-        header += self.id                  [:20].ljust(20, b'\x00')
-        header += (self.sex                  ).to_bytes(2, sys.byteorder)
-        header += (self.race                 ).to_bytes(2, sys.byteorder)
-        header += bytes_from_datetime(self.birth_date) #6
-        header += bytes_from_datetime(self.record_date)#6
-        header += bytes_from_datetime(self.file_date)  #6
-        header += bytes_from_datetime(self.start_time) #6
-        header += (len(leads)                ).to_bytes(2, sys.byteorder)
-        header += bytes_from_lead_names(leads)        #24
-        header += bytes_from_lead_qualities(leads)    #24
-        header += bytes_from_lead_resolutions(leads)  #24
-        header += (self.pm                   ).to_bytes(2, sys.byteorder, signed=True)
-        header += self.recorder_type       [:40].ljust(40, b'\x00')
-        header += (leads[0].sr               ).to_bytes(2, sys.byteorder)
-        header += self.proprietary         [:80].ljust(80, b'\x00')
-        header += self.copyright           [:80].ljust(80, b'\x00')
-        header += self.reserved            [:88].ljust(88, b'\x00')
-        if len(self.var_block) > 0:
-            header += self.var_block
-        return bytes( header )
