@@ -177,6 +177,20 @@ class Holter:
                 if not timeout:
                     self.beat_anns[-1]['samp_num'] = current_sample
 
+    def deidentify(self):
+        """Remove all PII from the file header."""
+        self.first_name   = ''
+        self.last_name    = ''
+        self.id           = ''
+        self.sex          = 0
+        self.race         = 0
+        self.birth_date   = None
+        self.proprietary  = ''
+        self.copyright    = ''
+        self.reserved     = ''
+        self.var_block = None
+        # We don't redo the checksum because it will be fixed on re-write anyway.
+
     def compute_checksum(self, header_block=None):
         """Compute checksum of header block.  If header_block is None, it operates on
         the file on disk (pointed to by self.filename).
@@ -270,9 +284,9 @@ class Holter:
         header += (self.var_block_offset     ).to_bytes(4, sys.byteorder)
         header += (self.ecg_block_offset     ).to_bytes(4, sys.byteorder)
         header += (self.file_version         ).to_bytes(2, sys.byteorder, signed=True)
-        header += self.first_name          [:40].ljust(40, b'\x00')
-        header += self.last_name           [:40].ljust(40, b'\x00')
-        header += self.id                  [:20].ljust(20, b'\x00')
+        header += bytes(self.first_name,'UTF-8')     [:40].ljust(40, b'\x00')
+        header += bytes(self.last_name,'UTF-8')      [:40].ljust(40, b'\x00')
+        header += bytes(self.id,'UTF-8')             [:20].ljust(20, b'\x00')
         header += (self.sex                  ).to_bytes(2, sys.byteorder)
         header += (self.race                 ).to_bytes(2, sys.byteorder)
         if self.birth_date:
@@ -315,9 +329,9 @@ class Holter:
         header += (self.pm                   ).to_bytes(2, sys.byteorder, signed=True)
         header += self.recorder_type       [:40].ljust(40, b'\x00')
         header += (self.sr                   ).to_bytes(2, sys.byteorder)
-        header += self.proprietary         [:80].ljust(80, b'\x00')
-        header += self.copyright           [:80].ljust(80, b'\x00')
-        header += self.reserved            [:88].ljust(88, b'\x00')
+        header += bytes(self.proprietary,'UTF-8')    [:80].ljust(80, b'\x00')
+        header += bytes(self.copyright,'UTF-8')      [:80].ljust(80, b'\x00')
+        header += bytes(self.reserved,'UTF-8')       [:88].ljust(88, b'\x00')
         if self.var_block_size > 0:
             header += self.var_block
 
@@ -391,6 +405,7 @@ class Holter:
                 data += [ self.lead[i].data_int16(convert=convert_data) ]
             data = np.reshape( data, self.nleads*len(self.lead[0].data), 'F' )
             f.write( data )
+        # TODO?: remove partial file if it fails
 
 class Lead:
     def __init__(self, spec, qual, res):
