@@ -52,7 +52,11 @@ In the example above, `x` contains the following variables:
 * Miscellaneous text blocks: `proprietary`, `copyright`, and `reserved`
 * `var_block`: variable-length text block, not always present
 
-Everything except `data` is loaded when `x` is instantiated.  `load_data()` is then called to populate `data` for each lead.
+Everything except `data` is loaded when `x` is instantiated.  `load_data()` is then called to populate `data` for each lead.  Finally, to get at the original signal, you can access:
+
+    x.lead[0].data  # lead 1 signal
+    x.lead[1].data  # lead 2 signal
+    # ... etc.
 
 See http://thew-project.org/papers/Badilini.ISHNE.Holter.Standard.pdf to decode the values that use a dictionary, such as the gender, race, and pacemaker fields.  `spec_str()` and `qual_str()` are provided to decode the name and quality of each lead.
 
